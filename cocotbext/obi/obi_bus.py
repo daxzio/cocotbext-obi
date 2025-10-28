@@ -25,6 +25,9 @@ THE SOFTWARE.
 from cocotb_bus.bus import Bus
 
 
+from typing import List
+
+
 class ObiBus(Bus):
     """OBI (Open Bus Interface) bus signals"""
 
@@ -44,7 +47,7 @@ class ObiBus(Bus):
         "err",
         "rid",
     ]
-    _optional_signals = []
+    _optional_signals: List[str] = []
 
     def __init__(
         self, entity=None, prefix=None, signals=None, optional_signals=None, **kwargs
