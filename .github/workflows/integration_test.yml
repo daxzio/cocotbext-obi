@@ -36,6 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e cocotbext-obi
           pip install -e PeakRDL-etana
+          pip install cocotbext-apb cocotbext-ahb
 
       - name: Run PeakRDL-etana tests with OBI
         run: |

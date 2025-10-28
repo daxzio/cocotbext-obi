@@ -5,7 +5,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  test       - Run all tests"
-	@echo "  lint       - Run flake8 linter"
+	@echo "  lint       - Run pyflakes and ruff linters"
 	@echo "  mypy       - Run mypy type checker"
 	@echo "  dist       - Build distribution packages"
 	@echo "  clean      - Clean build artifacts"
@@ -13,12 +13,13 @@ help:
 
 test:
 	@echo "Running tests in tests/test_slverr..."
-	cd tests/test_slverr && make etana && make sim SIM=verilator
+	cd tests/test_slverr && make sim SIM=verilator
 
 lint:
-	@echo "Running flake8..."
-	flake8 cocotbext/ --count --select=E9,F63,F7,F82 --show-source --statistics
-	flake8 cocotbext/ --count --max-complexity=10 --max-line-length=119 --statistics
+	@echo "Running pyflakes..."
+	pyflakes cocotbext/
+	@echo "Running ruff..."
+	ruff check cocotbext/
 
 mypy:
 	@echo "Running mypy..."

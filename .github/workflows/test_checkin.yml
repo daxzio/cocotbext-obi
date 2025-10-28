@@ -9,9 +9,13 @@ on:
     - cron: '0 1 * * 0'  # Weekly on Sunday at 1 AM UTC
 
 jobs:
+  build_icarus:
+    uses: ./.github/workflows/setup_icarus.yml
+
   test_obi:
-    name: Test OBI (${{ matrix.python-version }}, ${{ matrix.sim }})
+    name: Test (${{ matrix.python-version }}, ${{ matrix.sim }})
     runs-on: ubuntu-latest
+    needs: [build_icarus]
     
     strategy:
       fail-fast: false
@@ -23,39 +27,42 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Cache Icarus
+        if: matrix.sim == 'icarus'
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.build_icarus.outputs.cache_dir }}
+          key: ${{ needs.build_icarus.outputs.cache_key }}
+
+      - name: Add Icarus to PATH
+        if: matrix.sim == 'icarus'
+        run: |
+          echo "${{ needs.build_icarus.outputs.cache_dir }}/bin" >> $GITHUB_PATH
+          sudo apt install -y ccache
+
+      - name: Setup Verilator
+        if: matrix.sim == 'verilator'
+        uses: veryl-lang/setup-verilator@v1
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install Icarus Verilog
-        if: matrix.sim == 'icarus'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y iverilog
-
-      - name: Install Verilator
-        if: matrix.sim == 'verilator'
-        uses: veryl-lang/setup-verilator@v1
-        with:
-          version: v5.028
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install peakrdl-etana
           pip install pytest pytest-xdist
 
       - name: Verify installation
         run: |
-          python -c "from cocotbext.obi import ObiMaster, ObiBus; print('✅ cocotbext-obi imported successfully')"
+          python -c "from cocotbext.obi import ObiMaster, ObiBus; print('✅ cocotbext-obi imported')"
 
       - name: Run test_slverr
         run: |
           cd tests/test_slverr
-          make etana
           make sim SIM=${{ matrix.sim }}
 
       - name: Upload test results
