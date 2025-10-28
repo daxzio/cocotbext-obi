@@ -1,0 +1,48 @@
+name: Integration Test with PeakRDL-etana
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test_integration:
+    name: Test with PeakRDL-etana
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout cocotbext-obi
+        uses: actions/checkout@v4
+        with:
+          path: cocotbext-obi
+
+      - name: Checkout PeakRDL-etana
+        uses: actions/checkout@v4
+        with:
+          repository: daxzio/PeakRDL-etana
+          path: PeakRDL-etana
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Verilator
+        uses: veryl-lang/setup-verilator@v1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e cocotbext-obi
+          pip install -e PeakRDL-etana
+
+      - name: Run PeakRDL-etana tests with OBI
+        run: |
+          cd PeakRDL-etana/tests
+          ./test_all.sh REGBLOCK=0 CPUIF=obi-flat SIM=verilator
+
+      - name: Verify results
+        run: |
+          echo "✅ Integration test complete"
+

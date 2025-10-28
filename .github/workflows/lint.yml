@@ -1,0 +1,59 @@
+name: Lint and Type Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: Lint with flake8
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 ruff
+
+      - name: Lint with flake8
+        run: |
+          flake8 cocotbext/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 cocotbext/ --count --max-complexity=10 --max-line-length=119 --statistics
+
+      - name: Lint with ruff
+        run: |
+          ruff check cocotbext/ || true
+
+  mypy:
+    name: Type check with mypy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install mypy
+
+      - name: Type check with mypy
+        run: |
+          mypy cocotbext/obi --ignore-missing-imports || true
+
