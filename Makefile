@@ -22,7 +22,7 @@ lint:
 	ruff check cocotbext/
 
 mypy:
-	@echo "Running mypy..."
+	@echo "Running mypy type checker..."
 	mypy cocotbext/obi --ignore-missing-imports || true
 
 dist:
