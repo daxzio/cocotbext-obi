@@ -20,9 +20,10 @@ test:
 test_all:
 	@for sim in $(SIMS); do \
 		echo "\n=== Running tests with $$sim ==="; \
-		(cd tests/test_basic && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_basic_64 && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_slverr && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_basic && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_basic_64 && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_slverr && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_slave && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 	done
 
 test_icarus:
