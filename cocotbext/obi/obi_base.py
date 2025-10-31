@@ -3,10 +3,7 @@ Base class for OBI drivers
 """
 
 import logging
-import datetime
 from random import randint, seed
-
-from .version import __version__
 
 
 class ObiBase:
