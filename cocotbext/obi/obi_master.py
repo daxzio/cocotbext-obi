@@ -111,6 +111,7 @@ class ObiMaster:
         data: Union[int, bytes],
         strb: int = -1,
         error_expected: bool = False,
+        length: int = -1,
     ) -> None:
         """Write data to OBI subordinate
         
@@ -122,7 +123,7 @@ class ObiMaster:
             strb: Byte enable mask (default: all bytes enabled)
             error_expected: Whether an error response is expected
         """
-        self.write_nowait(addr, data, strb, error_expected)
+        self.write_nowait(addr, data, strb, error_expected, length=length)
         await self._idle.wait()
 
     def write_nowait(
@@ -131,17 +132,24 @@ class ObiMaster:
         data: Union[int, bytes],
         strb: int = -1,
         error_expected: bool = False,
+        length: int = -1,
     ) -> None:
         """Queue write without waiting for completion"""
         # Calculate how many bus-width transactions needed
         if isinstance(data, int):
-            num_transactions = (
-                math.ceil(data.bit_length() / self.wwidth)
-                if data.bit_length() > 0
-                else 1
-            )
+            if length and length > 0:
+                num_transactions = math.ceil((length * 8) / self.wwidth)
+            else:
+                num_transactions = (
+                    math.ceil(data.bit_length() / self.wwidth)
+                    if data.bit_length() > 0
+                    else 1
+                )
         else:
-            num_transactions = math.ceil(len(data) / self.wbytes)
+            if length and length > 0:
+                num_transactions = math.ceil(length / self.wbytes)
+            else:
+                num_transactions = math.ceil(len(data) / self.wbytes)
         
         # Split into multiple bus-width transactions if needed
         for i in range(num_transactions):
@@ -162,6 +170,7 @@ class ObiMaster:
         addr: int,
         data: Union[int, bytes] = bytes(),
         error_expected: bool = False,
+        length: int = -1,
     ) -> bytes:
         """Read data from OBI subordinate
         
@@ -175,7 +184,7 @@ class ObiMaster:
         Returns:
             Read data as bytes
         """
-        rx_id = self.read_nowait(addr, data, error_expected)
+        rx_id = self.read_nowait(addr, data, error_expected, length=length)
         found = False
         while not found:
             while self.queue_rx:
@@ -192,17 +201,24 @@ class ObiMaster:
         addr: int,
         data: Union[int, bytes] = bytes(),
         error_expected: bool = False,
+        length: int = -1,
     ) -> int:
         """Queue read without waiting for completion"""
         # Calculate how many bus-width transactions needed
         if isinstance(data, int):
-            num_transactions = (
-                math.ceil(data.bit_length() / self.rwidth)
-                if data.bit_length() > 0
-                else 1
-            )
+            if length and length > 0:
+                num_transactions = math.ceil((length * 8) / self.rwidth)
+            else:
+                num_transactions = (
+                    math.ceil(data.bit_length() / self.rwidth)
+                    if data.bit_length() > 0
+                    else 1
+                )
         else:
-            num_transactions = 1
+            if length and length > 0:
+                num_transactions = math.ceil(length / self.rbytes)
+            else:
+                num_transactions = 1
         
         # Split into multiple bus-width transactions if needed
         for i in range(num_transactions):

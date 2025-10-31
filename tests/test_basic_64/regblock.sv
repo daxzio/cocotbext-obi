@@ -9,18 +9,18 @@ module regblock #(
 
         input wire s_obi_req,
         output logic s_obi_gnt,
-        input wire [3:0] s_obi_addr,
+        input wire [7:0] s_obi_addr,
         input wire s_obi_we,
-        input wire [3:0] s_obi_be,
-        input wire [31:0] s_obi_wdata,
+        input wire [7:0] s_obi_be,
+        input wire [63:0] s_obi_wdata,
         input wire [ID_WIDTH-1:0] s_obi_aid,
         output logic s_obi_rvalid,
         input wire s_obi_rready,
-        output logic [31:0] s_obi_rdata,
+        output logic [63:0] s_obi_rdata,
         output logic s_obi_err,
-        output logic [ID_WIDTH-1:0] s_obi_rid,
+        output logic [ID_WIDTH-1:0] s_obi_rid
 
-        output logic [31:0] hwif_out_r_w_f
+
     );
 
     //--------------------------------------------------------------------------
@@ -28,15 +28,15 @@ module regblock #(
     //--------------------------------------------------------------------------
     logic cpuif_req;
     logic cpuif_req_is_wr;
-    logic [3:0] cpuif_addr;
-    logic [31:0] cpuif_wr_data;
-    logic [31:0] cpuif_wr_biten;
+    logic [7:0] cpuif_addr;
+    logic [63:0] cpuif_wr_data;
+    logic [63:0] cpuif_wr_biten;
     logic cpuif_req_stall_wr;
     logic cpuif_req_stall_rd;
 
     logic cpuif_rd_ack;
     logic cpuif_rd_err;
-    logic [31:0] cpuif_rd_data;
+    logic [63:0] cpuif_rd_data;
 
     logic cpuif_wr_ack;
     logic cpuif_wr_err;
@@ -46,7 +46,7 @@ module regblock #(
     logic is_active; // A request is being served (not yet fully responded)
     logic gnt_q; // one-cycle grant for A-channel
     logic rsp_pending; // response ready but not yet accepted by manager
-    logic [31:0] rsp_rdata_q;
+    logic [63:0] rsp_rdata_q;
     logic rsp_err_q;
     logic [$bits(s_obi_rid)-1:0] rid_q;
 
@@ -79,7 +79,7 @@ module regblock #(
                     cpuif_addr <= s_obi_addr;
                     cpuif_wr_data <= s_obi_wdata;
                     rid_q <= s_obi_aid;
-                    for (int i = 0; i < 4; i++) begin
+                    for (int i = 0; i < 8; i++) begin
                         cpuif_wr_biten[i*8 +: 8] <= {8{ s_obi_be[i] }};
                     end
                 end
@@ -122,36 +122,22 @@ module regblock #(
     //--------------------------------------------------------------------------
     // Address Decode
     //--------------------------------------------------------------------------
-    logic [0:0] decoded_reg_strb_r_rw;
-    logic [0:0] decoded_reg_strb_r_r;
-    logic [0:0] decoded_reg_strb_r_w;
-    logic decoded_err;
-
+    logic [0:0] decoded_reg_strb_regs [32];
     logic decoded_req;
     logic decoded_req_is_wr;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [31:0] decoded_wr_data;
-    logic [31:0] decoded_wr_biten;
+    logic [63:0] decoded_wr_data;
+    logic [63:0] decoded_wr_biten;
     /* verilator lint_on UNUSEDSIGNAL */
 
     always @(*) begin
         /* verilator lint_off UNUSEDSIGNAL */
         integer next_cpuif_addr;
         /* verilator lint_on UNUSEDSIGNAL */
-        logic is_valid_addr;
-        logic is_invalid_rw;
-        is_valid_addr = '0;
-        is_invalid_rw = '0;
-        decoded_reg_strb_r_rw = cpuif_req_masked & (cpuif_addr == 4'h0);
-        is_valid_addr |= cpuif_req_masked & (cpuif_addr == 4'h0);
-        is_invalid_rw |= '0;
-        decoded_reg_strb_r_r = cpuif_req_masked & (cpuif_addr == 4'h4) & !cpuif_req_is_wr;
-        is_valid_addr |= cpuif_req_masked & (cpuif_addr == 4'h4);
-        is_invalid_rw |= cpuif_req_masked & (cpuif_addr == 4'h4) & cpuif_req_is_wr;
-        decoded_reg_strb_r_w = cpuif_req_masked & (cpuif_addr == 4'h8) & cpuif_req_is_wr;
-        is_valid_addr |= cpuif_req_masked & (cpuif_addr == 4'h8);
-        is_invalid_rw |= cpuif_req_masked & (cpuif_addr == 4'h8) & !cpuif_req_is_wr;
-        decoded_err = (~is_valid_addr | is_invalid_rw) & decoded_req;
+        for(int i0=0; i0<32; i0++) begin : gen_loop_3
+            next_cpuif_addr = 32'h0 + i0*8'h8;
+            decoded_reg_strb_regs[i0] = cpuif_req_masked & (cpuif_addr == next_cpuif_addr[7:0]);
+        end
     end
 
     // Pass down signals to next stage
@@ -165,65 +151,42 @@ module regblock #(
     // Field storage declarations
     //--------------------------------------------------------------------------
 
-    // Field: regblock.r_rw.f
-    logic [31:0] field_storage_r_rw_f_value;
-    logic [31:0] field_combo_r_rw_f_next;
-    logic field_combo_r_rw_f_load_next;
-    // Field: regblock.r_w.f
-    logic [31:0] field_storage_r_w_f_value;
-    logic [31:0] field_combo_r_w_f_next;
-    logic field_combo_r_w_f_load_next;
+    // Field: regblock.regs[].f
+    logic [63:0] field_storage_regs_f_value [32] ;
+    logic [63:0] field_combo_regs_f_next [32] ;
+    logic field_combo_regs_f_load_next [32] ;
     //--------------------------------------------------------------------------
     // Field logic
     //--------------------------------------------------------------------------
-    // always_comb begin
-    always @(*) begin
-        logic [31:0] next_c;
-        logic load_next_c;
-        next_c = field_storage_r_rw_f_value;
-        load_next_c = '0;
-        if(decoded_reg_strb_r_rw && decoded_req_is_wr) begin // SW write
-            next_c = (field_storage_r_rw_f_value & ~decoded_wr_biten[31:0]) | (decoded_wr_data[31:0] & decoded_wr_biten[31:0]);
-            load_next_c = '1;
+    for(genvar i0=0; i0<32; i0++) begin : gen_loop_5
+        // always_comb begin
+        always @(*) begin
+            logic [63:0] next_c;
+            logic load_next_c;
+            next_c = field_storage_regs_f_value[i0];
+            load_next_c = '0;
+            if(decoded_reg_strb_regs[i0] && decoded_req_is_wr) begin // SW write
+                next_c = (field_storage_regs_f_value[i0] & ~decoded_wr_biten[63:0]) | (decoded_wr_data[63:0] & decoded_wr_biten[63:0]);
+                load_next_c = '1;
+            end
+            field_combo_regs_f_next[i0] = next_c;
+            field_combo_regs_f_load_next[i0] = load_next_c;
         end
-        field_combo_r_rw_f_next = next_c;
-        field_combo_r_rw_f_load_next = load_next_c;
-    end
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            field_storage_r_rw_f_value <= 32'h28;
-        end else if(field_combo_r_rw_f_load_next) begin
-            field_storage_r_rw_f_value <= field_combo_r_rw_f_next;
-        end
-    end
-    // always_comb begin
-    always @(*) begin
-        logic [31:0] next_c;
-        logic load_next_c;
-        next_c = field_storage_r_w_f_value;
-        load_next_c = '0;
-        if(decoded_reg_strb_r_w && decoded_req_is_wr) begin // SW write
-            next_c = (field_storage_r_w_f_value & ~decoded_wr_biten[31:0]) | (decoded_wr_data[31:0] & decoded_wr_biten[31:0]);
-            load_next_c = '1;
-        end
-        field_combo_r_w_f_next = next_c;
-        field_combo_r_w_f_load_next = load_next_c;
-    end
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            field_storage_r_w_f_value <= 32'h64;
-        end else if(field_combo_r_w_f_load_next) begin
-            field_storage_r_w_f_value <= field_combo_r_w_f_next;
+        always_ff @(posedge clk) begin
+            if(rst) begin
+                field_storage_regs_f_value[i0] <= 64'h1;
+            end else if(field_combo_regs_f_load_next[i0]) begin
+                field_storage_regs_f_value[i0] <= field_combo_regs_f_next[i0];
+            end
         end
     end
-    assign hwif_out_r_w_f = field_storage_r_w_f_value;
 
     //--------------------------------------------------------------------------
     // Write response
     //--------------------------------------------------------------------------
     assign cpuif_wr_ack = decoded_req & decoded_req_is_wr;
     // Writes are always granted with no error response
-    assign cpuif_wr_err = decoded_err;
+    assign cpuif_wr_err = '0;
 
 //--------------------------------------------------------------------------
 // Readback
@@ -233,21 +196,22 @@ module regblock #(
 
     logic readback_err;
     logic readback_done;
-    logic [31:0] readback_data;
+    logic [63:0] readback_data;
 
     // Assign readback values to a flattened array
-    logic [31:0] readback_array[2];
-    assign readback_array[0][31:0] = (decoded_reg_strb_r_rw && !decoded_req_is_wr) ? field_storage_r_rw_f_value : '0;
-    assign readback_array[1][31:0] = (decoded_reg_strb_r_r && !decoded_req_is_wr) ? 32'h50 : '0;
+    logic [63:0] readback_array[32];
+    for(genvar i0=0; i0<32; i0++) begin : gen_loop_1
+        assign readback_array[i0*1 + 0][63:0] = (decoded_reg_strb_regs[i0] && !decoded_req_is_wr) ? field_storage_regs_f_value[i0] : '0;
+    end
 
     // Reduce the array
     // always_comb begin
     always @(*) begin
-        logic [31:0] readback_data_var;
+        logic [63:0] readback_data_var;
         readback_done = decoded_req & ~decoded_req_is_wr;
-        readback_err = decoded_err;
+        readback_err = '0;
         readback_data_var = '0;
-        for(int i=0; i<2; i++) readback_data_var |= readback_array[i];
+        for(int i=0; i<32; i++) readback_data_var |= readback_array[i];
         readback_data = readback_data_var;
     end
 

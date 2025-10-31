@@ -1,4 +1,4 @@
-.PHONY: help clean dist lint mypy test
+.PHONY: help clean dist lint mypy test test_all test_icarus test_verilator
 
 help:
 	@echo "cocotbext-obi Makefile"
@@ -11,9 +11,25 @@ help:
 	@echo "  clean      - Clean build artifacts"
 	@echo "  install    - Install package in development mode"
 
+SIMS?=icarus verilator
+
 test:
-	@echo "Running tests in tests/test_slverr..."
-	cd tests/test_slverr && make sim SIM=verilator
+	@echo "Running all tests on default simulators: $(SIMS)"
+	$(MAKE) test_all SIMS="$(SIMS)"
+
+test_all:
+	@for sim in $(SIMS); do \
+		echo "\n=== Running tests with $$sim ==="; \
+		(cd tests/test_basic && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_basic_64 && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_slverr && $(MAKE) clean etana sim SIM=$$sim) || exit $$?; \
+	done
+
+test_icarus:
+	$(MAKE) test_all SIMS="icarus"
+
+test_verilator:
+	$(MAKE) test_all SIMS="verilator"
 
 lint:
 	@echo "Running pyflakes..."

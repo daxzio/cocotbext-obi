@@ -22,10 +22,9 @@ THE SOFTWARE.
 
 """
 
-from cocotb_bus.bus import Bus
-
-
 from typing import List
+
+from .bus import Bus
 
 
 class ObiBus(Bus):
