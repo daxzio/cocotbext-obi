@@ -3,7 +3,7 @@ from cocotb import test
 
 from interfaces.clkrst import ClkReset
 
-from cocotbext.obi import ObiMaster
+from cocotbext.obi import ObiHost
 from cocotbext.obi import ObiBus
 
 
@@ -20,7 +20,7 @@ class testbench:
         obi_prefix = "s_obi"
         self.bus = ObiBus.from_prefix(dut, obi_prefix)
         clk_name = "clk"
-        self.intf = ObiMaster(self.bus, getattr(dut, clk_name))
+        self.intf = ObiHost(self.bus, getattr(dut, clk_name))
 
 
 @test()
@@ -116,4 +116,3 @@ async def test_dut_incorrect_read_err(dut):
     ), "Exception did not occur when it should have"
 
     await tb.cr.end_test(200)
-

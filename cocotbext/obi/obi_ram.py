@@ -1,20 +1,37 @@
-from .obi_slave import ObiSlave
+"""
 
-# Import Memory from cocotbext.apb since we're reusing that infrastructure
-from cocotbext.apb.memory import Memory
+Copyright (c) 2024-2026 Daxzio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+"""
+
+from .memory import Memory
+from .obi_device import ObiDevice
 
 
-class ObiRam(ObiSlave, Memory):
-    def __init__(
-        self,
-        bus,
-        clock,
-        size=2**32,
-        mem=None,
-        **kwargs
-    ):
-        Memory.__init__(self, size, mem, **kwargs)
-        ObiSlave.__init__(self, bus, clock, **kwargs)
+class ObiRam(ObiDevice, Memory):
+    """OBI device backed by a sparse in-memory store."""
+
+    def __init__(self, bus, clock, size=2**32, mem=None, autostart=True, **kwargs):
+        Memory.__init__(self, size, mem)
+        ObiDevice.__init__(self, bus, clock, autostart=autostart, **kwargs)
 
     async def _write(self, address, data, strb=None):
         if strb is None:
@@ -26,4 +43,3 @@ class ObiRam(ObiSlave, Memory):
 
     async def _read(self, address, length):
         return self.read(address % self.size, length)
-

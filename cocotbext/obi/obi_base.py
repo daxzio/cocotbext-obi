@@ -5,9 +5,11 @@ Base class for OBI drivers
 import logging
 from random import randint, seed
 
+from .utils import resolve_x_int
+
 
 class ObiBase:
-    def __init__(self, bus, clock, name="monitor", seednum=None) -> None:
+    def __init__(self, bus, clock, name="monitor", seednum=None, **kwargs) -> None:
         self.name = name
         self.bus = bus
         self.clock = clock
@@ -31,6 +33,15 @@ class ObiBase:
         self.log.info(f"OBI {self.name} configuration:")
         self.log.info(f"  Address width: {self.address_width} bits")
         self.log.info(f"  Data width: {self.wwidth} bits ({self.byte_lanes} bytes)")
+
+        self.has_aid = hasattr(self.bus, "aid")
+        self.has_rid = hasattr(self.bus, "rid")
+        if self.has_aid:
+            self.aid_width = len(self.bus.aid)
+            self.aid_mask = (1 << self.aid_width) - 1
+        else:
+            self.aid_width = 0
+            self.aid_mask = 0
 
         self.backpressure = False
         if seednum is not None:
@@ -64,3 +75,18 @@ class ObiBase:
     def disable_backpressure(self):
         self.backpressure = False
 
+    @staticmethod
+    def sig_int(sig, default: int = 0) -> int:
+        """Read a bus signal as int; return *default* when unresolved (X/Z)."""
+        if not sig.value.is_resolvable:
+            return default
+        return resolve_x_int(sig)
+
+    def read_aid(self, default: int = 0) -> int:
+        if not self.has_aid:
+            return default
+        return self.sig_int(self.bus.aid, default)
+
+    def write_rid(self, value: int) -> None:
+        if self.has_rid:
+            self.bus.rid.value = value

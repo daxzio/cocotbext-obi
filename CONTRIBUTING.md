@@ -99,9 +99,9 @@ make mypy
 Use clear, descriptive commit messages:
 
 ```
-Add ObiSlave implementation
+Add ObiDevice implementation
 
-- Implements subordinate/slave side of OBI protocol
+- Implements device/subordinate side of OBI protocol
 - Supports memory-mapped responses
 - Includes tests for basic operation
 ```
@@ -127,6 +127,9 @@ Open an issue on GitHub or contact the maintainers.
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
+
+
 
 
 

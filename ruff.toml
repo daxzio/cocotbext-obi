@@ -1,0 +1,15 @@
+# Match flake8 line length in setup.cfg. target-version follows
+# python_requires (>=3.8); pyupgrade PEP 585/604 rules are ignored
+# because those spellings need 3.9/3.10 at runtime.
+line-length = 119
+target-version = "py38"
+
+[lint]
+ignore = [
+    "UP006",  # list[T] / dict[K, V]  (3.9+)
+    "UP007",  # X | Y                 (3.10+)
+    "UP035",  # typing.List/Dict/…    (3.9+)
+    "UP045",  # X | None              (3.10+)
+    "FA100",  # from __future__ import annotations
+    "FA102",
+]

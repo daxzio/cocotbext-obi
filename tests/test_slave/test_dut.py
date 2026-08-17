@@ -3,13 +3,13 @@ from cocotb import test
 
 from interfaces.clkrst import ClkReset
 
-from cocotbext.obi import ObiMaster
+from cocotbext.obi import ObiHost
 from cocotbext.obi import ObiBus
 from cocotbext.obi.obi_monitor import ObiMonitor
-from cocotbext.obi.obi_slave import ObiSlave
+from cocotbext.obi.obi_device import ObiDevice
 from cocotbext.obi.obi_ram import ObiRam
 
-from cocotbext.apb.address_space import MemoryRegion
+from cocotbext.obi.address_space import MemoryRegion
 
 
 class testbench:
@@ -20,16 +20,16 @@ class testbench:
 
         self.sbus = ObiBus.from_prefix(dut, "s_obi")
         clk_name = "clk"
-        self.m = ObiMaster(self.sbus, getattr(dut, clk_name))
+        self.m = ObiHost(self.sbus, getattr(dut, clk_name))
 
         self.obi_mon = ObiMonitor(self.sbus, getattr(dut, "clk"))
         self.obi_mon.start()
 
 
 @test()
-async def test_apb_memdump(dut):
+async def test_obi_memdump(dut):
     tb = testbench(dut, reset_sense=1)
-    tb.s = ObiSlave(tb.sbus, getattr(dut, "clk"))
+    tb.s = ObiDevice(tb.sbus, getattr(dut, "clk"))
     region = MemoryRegion(2**tb.s.address_width)
     tb.s.target = region
 
@@ -76,9 +76,9 @@ async def test_apb_memdump(dut):
 
 
 @test()
-async def test_apb_slave(dut):
+async def test_obi_device(dut):
     tb = testbench(dut, reset_sense=1)
-    tb.s = ObiSlave(tb.sbus, getattr(dut, "clk"))
+    tb.s = ObiDevice(tb.sbus, getattr(dut, "clk"))
     region = MemoryRegion(2**tb.s.address_width)
     tb.s.target = region
 
@@ -130,7 +130,7 @@ async def test_apb_slave(dut):
 
 
 @test()
-async def test_apb_ram(dut):
+async def test_obi_ram(dut):
     tb = testbench(dut, reset_sense=1)
     tb.s = ObiRam(tb.sbus, getattr(dut, "clk"))
 
@@ -154,6 +154,7 @@ async def test_apb_ram(dut):
     await tb.m.write(0x0020, 0xA356B3E1, strb=0x1)
     r = await tb.m.read(0x0020)
     assert int.from_bytes(r, "little") == 0x523285E1
+
     x = []
     for i in range(32):
         x.append(randint(0, 0xFFFFFFFF))

@@ -1,251 +1,111 @@
-# cocotbext-obi Testing Documentation
+# cocotbext-obi Testing
 
-## Test Suite Overview
+The package ships a cocotb test suite that exercises the OBI VIP (host,
+device, RAM, monitor) against small SystemVerilog tops. Tests are driven by
+per-suite Makefiles that include cocotb's `Makefile.sim`.
 
-The cocotbext-obi package includes comprehensive testing to verify OBI protocol compliance and error handling.
+## Prerequisites
 
----
-
-## Test Structure
-
-```
-tests/
-├── interfaces/
-│   └── clkrst.py         - Clock and reset utilities
-└── test_slverr/
-    ├── regblock.rdl      - Register definitions with sw=r/w/rw
-    ├── test_dut.py       - Three error handling tests
-    ├── Makefile          - Build and simulation control
-    └── README.md         - Test documentation
-```
-
----
-
-## Tests Included
-
-### test_slverr - Error Response Testing
-
-**Purpose:** Verify OBI error signal (`s_obi_err`) is correctly asserted for access violations
-
-**Test Cases:**
-1. ✅ `test_dut_proper_err` - Normal error handling
-2. ✅ `test_dut_incorrect_write_err` - Detect unexpected write errors
-3. ✅ `test_dut_incorrect_read_err` - Detect unexpected read errors
-
-**Results:**
-- Verilator: 3/3 PASS ✅
-- Icarus: 3/3 PASS ✅
-
----
-
-## Running Tests
-
-### Prerequisites
 ```bash
-# Ensure cocotbext-obi is installed
-cd /home/gomez/projects/cocotbext-obi
-pip install -e .
+cd cocotbext-obi
+pip install -e .            # install the package
+pip install -r requirements.txt
 
-# Ensure peakrdl-etana is installed (for RTL generation)
+# A simulator (Icarus Verilog or Verilator) must be on PATH.
+# Some suites regenerate RTL from RDL and need PeakRDL-etana:
 pip install peakrdl-etana
+
+# Optional: actually run the test_interface* suites (otherwise they skip)
+pip install -e .[interface]
 ```
 
-### Run Individual Test
+## Running the tests
+
+From the repository root:
+
+```bash
+make test                  # all suites, SIM=icarus verilator
+make test SIMS=icarus      # single simulator
+make test_icarus           # convenience target
+make test_verilator
+```
+
+A single suite:
+
+```bash
+cd tests/test_basic
+make clean sim SIM=verilator
+make clean sim SIM=icarus WAVES=1   # dump waves
+```
+
+Suites that generate RTL from RDL (via `../regblock.mak`):
+
 ```bash
 cd tests/test_slverr
-
-# Generate RTL with OBI and error responses
-make etana
-
-# Run with Verilator (fast)
+make etana                 # or: make regblock
 make sim SIM=verilator
-
-# Run with Icarus (open-source)
-make sim SIM=icarus
-
-# Clean
-make clean
 ```
 
----
+## Test suites
 
-## Test Details
+| Directory | What it covers |
+|-----------|----------------|
+| `test_basic` | Basic host read/write against a PeakRDL regblock (32-bit) |
+| `test_basic_64` | 64-bit data-width variant |
+| `test_slverr` | OBI `err` response handling (read-only / write-only violations, exception control) |
+| `test_slave` | `ObiDevice` / `ObiRam` / `MemoryRegion` targets, byte strobes, backpressure, `ObiMonitor` |
+| `test_ram` | Bulk read/write against an `ObiDevice` sized with `size_bytes` |
+| `test_memdump` | Memory prefill + read-back dump |
+| `test_pipelining` | Multiple outstanding transactions (`max_outstanding`), in-order completion, backpressure |
+| `test_addrmap` | Named + indexed register access via `AddressMap` / `addaddrmap()` (REGWIDTH 8/16/32) |
+| `test_poll` | `ObiHost.poll()` against a PeakRDL busy/start handshake |
+| `test_interface` | Same as `test_basic` via `ObiInterface` (skips without `cocotbext-interface`) |
+| `test_interface_noid` | `ObiInterface` against a DUT with no `aid`/`rid` (skips without the extra) |
 
-### Register Map
-```
-Address  Register  Access  Reset  Description
-0x00     r_rw      RW      40     Read-write register
-0x04     r_r       R       80     Read-only register  
-0x08     r_w       W       100    Write-only register
-```
-
-### Test Scenarios
-
-#### 1. Normal Operation
-```python
-# Read/write to RW register - no error
-await obi.write(0x00, 61)
-await obi.read(0x00, 61)
-
-# Read from R register - no error  
-await obi.read(0x04, 80)
-
-# Write to R register - error expected
-await obi.write(0x04, 81, error_expected=True)  # ✅ err=1
-
-# Read from W register - error expected
-await obi.read(0x08, 0, error_expected=True)  # ✅ err=1
-```
-
-#### 2. Exception Detection Testing
-```python
-# Disable exceptions to test error detection
-obi.exception_enabled = False
-assert obi.exception_occurred == False
-
-# Cause error without expecting it
-await obi.write(0x04, 81, error_expected=False)
-
-# Verify error was detected
-assert obi.exception_occurred == True  # ✅ Driver detected the error
-```
-
----
-
-## Extended Testing with PeakRDL-etana
-
-### Full Integration Tests
-
-The package is extensively tested through PeakRDL-etana's test suite:
+Pure-Python unit tests (no simulator):
 
 ```bash
-cd /home/gomez/projects/PeakRDL-etana/tests
-
-# Run all 30 tests with OBI
-./test_all.sh REGBLOCK=0 CPUIF=obi-flat SIM=verilator
+pytest tests/test_format_addr.py -v
 ```
 
-**Results:** ✅ 30/30 PASS (100%)
+Shared helpers live in `tests/interfaces/clkrst.py` (`ClkReset`). Suites that
+need it symlink `interfaces -> ../interfaces`.
 
-**Tests Include:**
-- Basic read/write operations
-- Wide register handling (64-bit on 32-bit bus)
-- Byte enables
-- Error responses (`test_cpuif_err_rsp`)
-- Interrupts
-- External registers
-- Field types (RO, WO, RW, W1C, W1S, etc.)
-- Hardware access
-- Counters
-- Parity
-- And more...
-
----
-
-## Error Response Testing Matrix
-
-### OBI Error Conditions Tested
-
-| Condition | Test | Expected Result | Status |
-|-----------|------|-----------------|--------|
-| Write to RO register | test_slverr | `err=1` | ✅ PASS |
-| Read from WO register | test_slverr | `err=1` | ✅ PASS |
-| Access unmapped address | test_cpuif_err_rsp | `err=1` | ✅ PASS |
-| Normal RW access | test_slverr | `err=0` | ✅ PASS |
-| Exception disabled mode | test_slverr | Flag set | ✅ PASS |
-
----
-
-## Performance Metrics
-
-### Test Execution Times
-
-| Test | Simulator | Time (s) | Sim Rate (ns/s) |
-|------|-----------|----------|-----------------|
-| test_slverr | Verilator | ~0.08 | ~158,000 |
-| test_slverr | Icarus | ~0.12 | ~105,000 |
-
-### Simulation Coverage
-
-- ✅ All OBI protocol phases tested
-- ✅ All error conditions tested
-- ✅ All access types tested (R, W, RW)
-- ✅ Multi-transaction handling tested
-- ✅ Both simulators verified
-
----
-
-## Adding More Tests
-
-### Template for New Tests
+## Writing a new test
 
 ```python
 from cocotb import test
 from interfaces.clkrst import ClkReset
-from cocotbext.obi import ObiMaster, ObiBus
+from cocotbext.obi import ObiBus, ObiHost
+
 
 class testbench:
     def __init__(self, dut, reset_sense=1, period=10):
         self.cr = ClkReset(dut, period, reset_sense=reset_sense, resetname="rst")
         self.bus = ObiBus.from_prefix(dut, "s_obi")
-        self.intf = ObiMaster(self.bus, getattr(dut, "clk"))
-        self.dut = dut
+        self.m = ObiHost(self.bus, dut.clk)
+
 
 @test()
 async def test_my_feature(dut):
     tb = testbench(dut)
-    await tb.cr.wait_clkn(200)
-    
-    # Your test code here
-    
-    await tb.cr.end_test(200)
+    await tb.cr.wait_clkn(20)
+    await tb.m.write(0x0000, 0x12345678)
+    await tb.m.read(0x0000, 0x12345678)   # 2nd arg asserts the read value
+    await tb.cr.end_test(20)
 ```
 
----
+## Pipelining
 
-## Continuous Integration
+`ObiHost(bus, clk, max_outstanding=N)` and `ObiDevice(bus, clk,
+max_outstanding=N)` enable up to *N* outstanding transactions with strict
+in-order completion. `max_outstanding=1` (default) uses a strictly sequential
+request/response loop and is fully backward compatible. See
+`tests/test_pipelining`.
 
-### GitHub Actions Example
+## CI
 
-```yaml
-name: Test cocotbext-obi
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ['3.8', '3.9', '3.10', '3.11', '3.12']
-        sim: [verilator, icarus]
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Install dependencies
-        run: |
-          pip install -e .
-          pip install peakrdl-etana
-          sudo apt-get install -y ${{ matrix.sim }}
-      - name: Run tests
-        run: |
-          cd tests/test_slverr
-          make etana
-          make sim SIM=${{ matrix.sim }}
-```
-
----
-
-## Summary
-
-**Test Suite:** ✅ Complete
-**Pass Rate:** 100% (3/3 tests)
-**Simulators:** Verilator ✅, Icarus ✅
-**Coverage:** Error responses, access violations, exception control
-
-The cocotbext-obi package is thoroughly tested and ready for production use.
-
-
-
+`.github/workflows/test_checkin.yml` runs lint + mypy (`make lint` / `make mypy`,
+both must pass), then a matrix of Python 3.9–3.13 × {icarus, verilator} ×
+cocotb v1.9.2 / v2.0.1, and Python 3.10–3.14 × {icarus, verilator} × cocotb
+master. Tag pushes trigger PyPI trusted publishing.

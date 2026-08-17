@@ -1,0 +1,148 @@
+"""
+
+Copyright (c) 2024-2026 Daxzio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+"""
+
+try:
+    from cocotb.handle import LogicArrayObject, LogicObject
+    from cocotbext.interface import Interface  # type: ignore[import]
+except ImportError as _import_error:  # pragma: no cover - exercised without the dep
+    HAVE_COCOTBEXT_INTERFACE = False
+    _INTERFACE_IMPORT_ERROR = _import_error
+
+    _MISSING_MSG = (
+        "ObiInterface requires cocotb 2.x and the optional "
+        "'cocotbext-interface' package. Install with:\n\n"
+        "    pip install 'cocotb>=2' cocotbext-interface\n\n"
+        "Alternatively use ObiBus, which has no extra dependencies."
+    )
+
+    class ObiInterface:  # type: ignore[no-redef]
+        """Placeholder used when ObiInterface cannot be constructed.
+
+        Either ``cocotbext-interface`` is not installed, or this cocotb
+        version does not provide ``LogicArrayObject`` (needs cocotb 2.x).
+        Importing :mod:`cocotbext.obi` still succeeds; construction raises.
+        """
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(_MISSING_MSG) from _INTERFACE_IMPORT_ERROR
+
+        @classmethod
+        def from_prefix(cls, *args, **kwargs):
+            raise ImportError(_MISSING_MSG) from _INTERFACE_IMPORT_ERROR
+
+        @classmethod
+        def from_entity(cls, *args, **kwargs):
+            raise ImportError(_MISSING_MSG) from _INTERFACE_IMPORT_ERROR
+
+else:
+    HAVE_COCOTBEXT_INTERFACE = True
+
+    class ObiInterface(Interface):  # type: ignore[no-redef]
+        """OBI bus using cocotbext-interface.
+
+        Drop-in replacement for ObiBus: provides the same signal attributes
+        and the ``_signals`` / ``_optional_signals`` compatibility layer
+        expected by ObiBase and its subclasses (ObiHost, ObiDevice,
+        ObiMonitor, ObiRam).
+
+        Connection mirrors the existing API::
+
+            bus = ObiInterface.from_prefix(dut, "s_obi")
+            host = ObiHost(bus, dut.clk)
+        """
+
+        # --- Required ---
+        req: LogicObject
+        gnt: LogicObject
+        addr: LogicArrayObject
+        we: LogicObject
+        be: LogicArrayObject
+        wdata: LogicArrayObject
+        rvalid: LogicObject
+        rready: LogicObject
+        rdata: LogicArrayObject
+        err: LogicObject
+
+        # --- Optional ---
+        aid: LogicObject | LogicArrayObject | None = None
+        rid: LogicObject | LogicArrayObject | None = None
+
+        def __init__(self, signals, index=None):
+            super().__init__(signals, index=index)
+
+            # Derive optional signal names from the class definition: any
+            # signal declared with a default value (= None) is optional.
+            # This mirrors how Interface._get_requirements() works internally.
+            requirements = self._get_requirements()
+            optional_names = [
+                name for name, default in requirements.items() if default is None
+            ]
+
+            # bus.Bus never sets an attribute for an absent optional signal, so
+            # hasattr(bus, "aid") is False.  Interface instead assigns None.
+            # Deleting the instance attribute is not enough: the class-level
+            # "aid = None" default would still satisfy the lookup.  Record
+            # the absent names and reject them in __getattribute__ so the VIPs'
+            # hasattr() guards (ObiBase, ObiHost, ObiDevice, ObiMonitor) work.
+            absent = frozenset(
+                name for name in optional_names if getattr(self, name, None) is None
+            )
+            for name in absent:
+                self.__dict__.pop(name, None)
+                if name in self._signals_list:
+                    self._signals_list.remove(name)
+            self._absent_signals = absent
+
+            self._signals = {n: getattr(self, n) for n in self._signals_list}
+            self._optional_signals = list(optional_names)
+            self._name = ""
+
+        def __getattribute__(self, name):
+            # Absent optional signals must look genuinely missing, otherwise
+            # the class-level None default would make hasattr() return True.
+            try:
+                absent = object.__getattribute__(self, "_absent_signals")
+            except AttributeError:
+                absent = ()
+            if name in absent:
+                raise AttributeError(
+                    f"{type(self).__name__!r} object has no attribute {name!r}: "
+                    "optional signal not present in the RTL"
+                )
+            return object.__getattribute__(self, name)
+
+        @classmethod
+        def from_prefix(cls, entity, prefix, **kwargs):
+            """Connect to ``entity.<prefix>_<signal>`` (e.g. ``from_prefix(dut, 's_obi')``)."""
+            pattern = f"{prefix}_%" if "%" not in prefix else prefix
+            instance = cls.from_pattern(entity, pattern=pattern, **kwargs)
+            instance._name = prefix
+            return instance
+
+        @classmethod
+        def from_entity(cls, entity, **kwargs):
+            """Connect to ``entity.<signal>`` (no prefix)."""
+            instance = super().from_entity(entity, **kwargs)
+            instance._name = ""
+            return instance

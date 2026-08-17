@@ -25,10 +25,15 @@ etana:
 	rm -rf regblock*.sv
 	peakrdl etana regblock.rdl -o ./ --cpuif ${CPUIF} ${RDL_ARGS} --rename regblock
 
+HWIF_WRAPPER_TOOL ?= ../../../PeakRDL-etana/scripts/hwif_wrapper_tool/generate_wrapper.py
 regblock:
 	rm -rf regblock*.sv
 	peakrdl regblock regblock.rdl -o ./ --cpuif ${CPUIF} ${RDL_ARGS} --rename regblock
-	../../../PeakRDL-etana/scripts/hwif_wrapper_tool/generate_wrapper.py regblock.rdl -o ./ --cpuif ${CPUIF} --rename regblock
+	@if [ -x "$(HWIF_WRAPPER_TOOL)" ]; then \
+		"$(HWIF_WRAPPER_TOOL)" regblock.rdl -o ./ --cpuif ${CPUIF} --rename regblock; \
+	else \
+		echo "hwif_wrapper_tool not found at '$(HWIF_WRAPPER_TOOL)' (set HWIF_WRAPPER_TOOL); skipping wrapper generation"; \
+	fi
 
 clean::
 	rm -rf sim_build/ __pycache__/ results.xml *.fst *.vcd

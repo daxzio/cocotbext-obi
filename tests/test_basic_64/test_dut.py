@@ -3,7 +3,7 @@ from cocotb import test
 
 from interfaces.clkrst import ClkReset
 
-from cocotbext.obi import ObiMaster
+from cocotbext.obi import ObiHost
 from cocotbext.obi import ObiBus
 
 
@@ -24,7 +24,7 @@ class testbench:
         obi_prefix = "s_obi"
         self.bus = ObiBus.from_prefix(dut, obi_prefix)
         clk_name = "clk"
-        self.intf = ObiMaster(self.bus, getattr(dut, clk_name))
+        self.intf = ObiHost(self.bus, getattr(dut, clk_name))
 
 
 @test()
@@ -136,9 +136,7 @@ async def test_dut_basic(dut):
     for i in range(tb.n_regs):
         z = randint(0, tb.n_regs - 1)
         y = x[z] & tb.mask
-        tb.intf.read_nowait(
-            0x0000 + (z * tb.incr), y.to_bytes(tb.incr, "little")
-        )
+        tb.intf.read_nowait(0x0000 + (z * tb.incr), y.to_bytes(tb.incr, "little"))
 
     for i in range(tb.n_regs):
         y = x[i] & tb.mask

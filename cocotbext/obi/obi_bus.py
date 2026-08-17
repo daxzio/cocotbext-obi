@@ -30,7 +30,7 @@ from .bus import Bus
 class ObiBus(Bus):
     """OBI (Open Bus Interface) bus signals"""
 
-    _signals = [
+    _signals = [  # noqa: RUF012
         # Request Channel (A)
         "req",
         "gnt",
@@ -38,15 +38,16 @@ class ObiBus(Bus):
         "we",
         "be",
         "wdata",
-        "aid",
         # Response Channel (R)
         "rvalid",
         "rready",
         "rdata",
         "err",
+    ]
+    _optional_signals: List[str] = [  # noqa: RUF012
+        "aid",
         "rid",
     ]
-    _optional_signals: List[str] = []
 
     def __init__(
         self, entity=None, prefix=None, signals=None, optional_signals=None, **kwargs
@@ -70,4 +71,3 @@ class ObiBus(Bus):
 
 # Alias for convenience
 OBIBus = ObiBus
-
