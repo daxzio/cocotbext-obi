@@ -46,7 +46,8 @@ jobs:
         cocotb-version: ["v1.9.2", "v2.0.1"]
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout code
+        uses: actions/checkout@v7
 
       - name: Cache Icarus
         if: matrix.sim == 'icarus'
