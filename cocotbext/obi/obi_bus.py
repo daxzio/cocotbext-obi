@@ -22,8 +22,6 @@ THE SOFTWARE.
 
 """
 
-from typing import List
-
 from .bus import Bus
 
 
@@ -44,7 +42,7 @@ class ObiBus(Bus):
         "rdata",
         "err",
     ]
-    _optional_signals: List[str] = [  # noqa: RUF012
+    _optional_signals: list[str] = [  # noqa: RUF012
         "aid",
         "rid",
     ]

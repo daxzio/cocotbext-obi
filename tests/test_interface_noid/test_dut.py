@@ -48,7 +48,18 @@ async def test_absent_optional_signals(dut):
     assert getattr(bus, "aid", None) is None
     assert getattr(bus, "rid", None) is None
 
-    for name in ("req", "gnt", "addr", "we", "be", "wdata", "rvalid", "rready", "rdata", "err"):
+    for name in (
+        "req",
+        "gnt",
+        "addr",
+        "we",
+        "be",
+        "wdata",
+        "rvalid",
+        "rready",
+        "rdata",
+        "err",
+    ):
         assert hasattr(bus, name), f"required signal {name} missing"
 
     assert "aid" not in bus._signals

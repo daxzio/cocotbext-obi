@@ -154,8 +154,7 @@ make pre-commit # pre-commit run --all-files
 ```
 
 flake8 config in `setup.cfg` (`max-line-length = 119`, `__init__.py:F401`).
-Ruff config in `ruff.toml` (line-length 119, target-version py38; PEP 585/604
-pyupgrade rules ignored so 3.8/3.9 stay valid).
+Ruff config in `ruff.toml` (line-length 119, target-version py310).
 
 ## Packaging & release
 
@@ -166,7 +165,7 @@ pyupgrade rules ignored so 3.8/3.9 stay valid).
 ## CI (`.github/workflows/test_checkin.yml`)
 
 Runs on push/PR + weekly cron: `run_lint` (`make lint` + `make mypy`; mypy
-failures fail the job), then a matrix of Python 3.9–3.13 × cocotb v1.9.2 /
+failures fail the job), then a matrix of Python 3.10–3.13 × cocotb v1.9.2 /
 v2.0.1, and 3.10–3.14 × cocotb master, × icarus/verilator. Tag pushes trigger
 PyPI trusted publishing. Simulator builds are cached via the `setup_*.yml`
 reusable workflows.

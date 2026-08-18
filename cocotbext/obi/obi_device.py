@@ -25,7 +25,7 @@ THE SOFTWARE.
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Deque, Optional, Tuple
+from typing import Any, Optional
 
 from cocotb import start_soon
 from cocotb.triggers import RisingEdge
@@ -113,7 +113,7 @@ class ObiDevice(ObiBase):
     async def _read(self, address, length):
         return await self.target.read(address, length)
 
-    async def _process(self, addr, we, be, wdata, aid) -> Tuple[int, int, int]:
+    async def _process(self, addr, we, be, wdata, aid) -> tuple[int, int, int]:
         """Apply a request and return the response tuple ``(rid, rdata, err)``."""
         try:
             if we:
@@ -181,7 +181,7 @@ class ObiDevice(ObiBase):
         self.bus.err.value = 0
         self.write_rid(0)
 
-        pending: Deque[Tuple[int, int, int]] = deque()
+        pending: deque[tuple[int, int, int]] = deque()
         granted_prev = False
         await RisingEdge(self.clock)
         while True:

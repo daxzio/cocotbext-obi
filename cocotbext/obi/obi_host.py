@@ -25,7 +25,7 @@ THE SOFTWARE.
 import logging
 import math
 from collections import deque
-from typing import Any, Deque, Tuple, Union
+from typing import Any, Union
 
 from cocotb import start_soon
 from cocotb.triggers import Event, RisingEdge
@@ -95,10 +95,10 @@ class ObiHost(ObiBase):
             self.log.info("  Timeout: disabled")
 
         # (write, addr, data, strb, error_expected, tx_id)
-        self.queue_tx: Deque[Tuple[bool, int, bytes, int, bool, int]] = deque()
-        self.queue_rx: Deque[Tuple[bytes, int]] = deque()
+        self.queue_tx: deque[tuple[bool, int, bytes, int, bool, int]] = deque()
+        self.queue_rx: deque[tuple[bytes, int]] = deque()
         # outstanding: (write, addr, expected_data, error_expected, tx_id)
-        self.outstanding: Deque[Tuple[bool, int, bytes, bool, int]] = deque()
+        self.outstanding: deque[tuple[bool, int, bytes, bool, int]] = deque()
         self.tx_id = 0
 
         self.sync = Event()

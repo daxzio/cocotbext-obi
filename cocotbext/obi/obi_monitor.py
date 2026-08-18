@@ -24,7 +24,8 @@ THE SOFTWARE.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
+from typing import Any, Optional
 
 import cocotb
 from cocotb import start_soon
@@ -71,12 +72,12 @@ class ObiMonitor(ObiBase):
     def __init__(self, bus: ObiBus, clock: Any, **kwargs) -> None:
         super().__init__(bus, clock, name="monitor", **kwargs)
         self.disable_logging()
-        self._queue: List[ObiTransaction] = []
+        self._queue: list[ObiTransaction] = []
         self._active: bool = False
         self._aid_latched: int = 0
         self._req_sample: Optional[ObiTransaction] = None
         self._run_coroutine_obj: Any = None
-        self._check_sync_coroutines: List[Any] = []
+        self._check_sync_coroutines: list[Any] = []
         self._last_clk_time: int = 0
 
     def start(self) -> None:

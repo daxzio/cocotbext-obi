@@ -37,6 +37,9 @@ Optional `ObiInterface` extra (needs **cocotb 2.x**):
 
     $ pip install cocotbext-obi[interface]
 
+Requires **Python 3.10+**. CI runs Python 3.10–3.13 against cocotb v1.9.2 and
+v2.0.1, and Python 3.10–3.14 against cocotb master.
+
 ## OBI Protocol Overview
 
 OBI uses a two-phase handshake protocol:

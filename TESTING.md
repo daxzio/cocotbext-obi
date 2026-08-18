@@ -106,6 +106,6 @@ request/response loop and is fully backward compatible. See
 ## CI
 
 `.github/workflows/test_checkin.yml` runs lint + mypy (`make lint` / `make mypy`,
-both must pass), then a matrix of Python 3.9–3.13 × {icarus, verilator} ×
+both must pass), then a matrix of Python 3.10–3.13 × {icarus, verilator} ×
 cocotb v1.9.2 / v2.0.1, and Python 3.10–3.14 × {icarus, verilator} × cocotb
 master. Tag pushes trigger PyPI trusted publishing.
