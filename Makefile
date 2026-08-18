@@ -1,5 +1,5 @@
 .PHONY: help clean dist lint mypy format checks pre-commit release \
-	test test_all test_icarus test_verilator
+	test test_all test_icarus test_verilator git_align
 
 help:
 	@echo "cocotbext-obi Makefile"
@@ -30,19 +30,20 @@ test:
 test_all:
 	@for sim in $(SIMS); do \
 		echo "\n=== Running tests with $$sim ==="; \
-		(cd tests/test_basic && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_basic_64 && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_slverr && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_device && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_ram && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_memdump && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_pipelining && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=8) || exit $$?; \
-		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=16) || exit $$?; \
-		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=32) || exit $$?; \
-		(cd tests/test_poll && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_interface && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_interface_noid && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_basic && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_basic_64 && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_slverr && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_device && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_ram && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_memdump && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_pipelining && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=8 WAVES=0) || exit $$?; \
+		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=16 WAVES=0) || exit $$?; \
+		(cd tests/test_addrmap && $(MAKE) clean sim SIM=$$sim REGWIDTH=32 WAVES=0) || exit $$?; \
+		(cd tests/test_poll && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_early_external_read && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_interface && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
+		(cd tests/test_interface_noid && $(MAKE) clean sim SIM=$$sim WAVES=0) || exit $$?; \
 	done
 
 test_icarus:
@@ -85,6 +86,12 @@ release:
 	git commit --allow-empty -m "Update to version ${GIT_TAG}"
 	git tag -f v${GIT_TAG}
 	git push && git push --tags
+
+git_align:
+	mkdir -p repos
+	cd repos ; git clone git@github.com:daxzio/rtlflo.git 2> /dev/null || (cd rtlflo ; git pull)
+	rsync -artu --exclude .git repos/rtlflo/ tests/rtlflo
+	rsync -artu --exclude .git tests/rtlflo/ repos/rtlflo
 
 clean:
 	@echo "Cleaning build artifacts..."

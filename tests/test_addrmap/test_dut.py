@@ -118,6 +118,8 @@ async def addrmap3(dut):
         }
     )
 
+    await tb.cr.wait_clkn(200)
+
     await tb.intf.read("STATUS[0]", 0x12)
     await tb.intf.read("STATUS[1]", 0x34)
     await tb.intf.read("STATUS[2]", 0x56)
@@ -156,6 +158,8 @@ async def addrmap4(dut):
             "INTERRUPT": 0x0000 + tb.incr * 3,
         }
     )
+
+    await tb.cr.wait_clkn(200)
 
     await tb.intf.read("STATUS", 0x12, index=0)
     await tb.intf.read("STATUS", 0x34, index=1)

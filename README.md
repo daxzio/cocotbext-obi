@@ -392,11 +392,11 @@ await host.wait()  # Wait for all to complete
 ```
 
 **Key points:**
-- `max_outstanding=1` (default): Strictly sequential behavior, fully backward compatible
-- `max_outstanding > 1`: Enables pipelining for better throughput
+- Default `max_outstanding=2` (set `1` for strictly sequential issue)
 - Host and device should use matching `max_outstanding` values for best performance
 - Responses are **guaranteed** to return in the exact order requests were accepted (OBI requirement)
 - Backpressure is automatic: when the pipeline is full, new requests wait until space is available
+- Blocking `read()` waits for earlier writes; `read_nowait()` issues immediately
 
 ### Optional `ObiInterface` (cocotbext-interface)
 

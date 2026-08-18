@@ -25,15 +25,27 @@ THE SOFTWARE.
 import logging
 import math
 from collections import deque
-from typing import Any, Union
+from dataclasses import dataclass
+from typing import Any, Optional, Union
 
 from cocotb import start_soon
-from cocotb.triggers import Event, RisingEdge
+from cocotb.triggers import Event, First, RisingEdge
 
 from .address_map import AddressMap
 from .constants import OBIError
 from .obi_base import ObiBase
 from .utils import resolve_x_int
+
+
+@dataclass
+class _ObiTxOp:
+    write: bool
+    addr: int
+    data: bytes
+    strb: int
+    error_expected: bool
+    tx_id: int
+    event: Event
 
 
 class ObiHost(ObiBase):
@@ -42,7 +54,8 @@ class ObiHost(ObiBase):
     Implements the manager side of the OBI protocol from OpenHW Group.
     Supports automatic splitting of wide data into multiple bus-width
     transactions, register-name addressing via an :class:`AddressMap`, and
-    optional pipelining of multiple outstanding transactions.
+    pipelined address/data phases via decoupled A-channel and R-channel
+    coroutines.
 
     Parameters
     ----------
@@ -55,9 +68,9 @@ class ObiHost(ObiBase):
         timeout. Set to ``-1`` to disable. Default ``1000``.
     max_outstanding:
         Maximum number of outstanding (accepted but not yet responded)
-        transactions. ``1`` (default) uses a strictly sequential, backward
-        compatible request/response loop. Values ``>1`` enable pipelining
-        with strict in-order completion.
+        transactions. Default ``2``. Values ``>1`` allow the address phase of
+        transaction N+1 to overlap the data phase of N when the subordinate
+        supports it.
     """
 
     def __init__(
@@ -66,7 +79,7 @@ class ObiHost(ObiBase):
         clock,
         name: str = "host",
         timeout_cycles: int = 1000,
-        max_outstanding: int = 1,
+        max_outstanding: int = 2,
         **kwargs,
     ) -> None:
         super().__init__(bus, clock, name=name, **kwargs)
@@ -94,17 +107,22 @@ class ObiHost(ObiBase):
         else:
             self.log.info("  Timeout: disabled")
 
-        # (write, addr, data, strb, error_expected, tx_id)
-        self.queue_tx: deque[tuple[bool, int, bytes, int, bool, int]] = deque()
+        self.queue_tx: deque[_ObiTxOp] = deque()
         self.queue_rx: deque[tuple[bytes, int]] = deque()
-        # outstanding: (write, addr, expected_data, error_expected, tx_id)
-        self.outstanding: deque[tuple[bool, int, bytes, bool, int]] = deque()
+        self.outstanding: deque[_ObiTxOp] = deque()
         self.tx_id = 0
 
         self.sync = Event()
 
         self._idle = Event()
         self._idle.set()
+        self._rx_event = Event()
+        self._a_wake = Event()
+
+        self._presented: Optional[_ObiTxOp] = None
+        self._req_pause = 0
+        self._gnt_timeout = 0
+        self._resp_timeout = 0
 
         # Initialize request channel signals
         self.bus.req.value = 0
@@ -115,11 +133,11 @@ class ObiHost(ObiBase):
         if self.has_aid:
             self.bus.aid.value = 0
 
-        # Response channel (manager side) - always ready to accept responses
         self.bus.rready.value = 1
 
-        self._run_coroutine_obj: Any = None
-        self._resp_coroutine_obj: Any = None
+        self._a_coroutine_obj: Any = None
+        self._r_coroutine_obj: Any = None
+        self._rready_coroutine_obj: Any = None
         self._restart()
 
     # --- Address map helpers -------------------------------------------------
@@ -142,11 +160,7 @@ class ObiHost(ObiBase):
         return self.addrmap.format_col(label, prefix)
 
     def calc_length(self, length: int, data: Union[int, bytes], width: int) -> int:
-        """Number of bus-width transactions needed to transfer *data*.
-
-        ``width`` is the transfer width in bytes (wbytes for writes, rbytes
-        for reads).
-        """
+        """Number of bus-width transactions needed to transfer *data*."""
         if isinstance(data, int):
             if length and length > 0:
                 num = math.ceil((length * 8) / (width * 8))
@@ -176,8 +190,11 @@ class ObiHost(ObiBase):
         index: int = -1,
     ) -> None:
         """Write *data* to an OBI device and wait for completion."""
-        self.write_nowait(addr, data, strb, error_expected, length, device, index)
-        await self._idle.wait()
+        events = self._enqueue_write(
+            addr, data, strb, error_expected, length, device, index
+        )
+        for event in events:
+            await event.wait()
         for _ in range(self.intra_delay):
             await RisingEdge(self.clock)
 
@@ -192,8 +209,23 @@ class ObiHost(ObiBase):
         index: int = -1,
     ) -> None:
         """Queue a write without waiting for completion."""
+        self._enqueue_write(
+            addr, data, strb, error_expected, length, device, index
+        )
+
+    def _enqueue_write(
+        self,
+        addr: int,
+        data: Union[int, bytes],
+        strb: int = -1,
+        error_expected: bool = False,
+        length: int = -1,
+        device: int = 0,
+        index: int = -1,
+    ) -> list[Event]:
         resolved = self.calc_address(addr, device, index)
         num_transactions = self.calc_length(length, data, self.wbytes)
+        events: list[Event] = []
 
         for i in range(num_transactions):
             addrb = resolved + i * self.wbytes
@@ -203,10 +235,38 @@ class ObiHost(ObiBase):
             else:
                 datab = data[i * self.wbytes : (i + 1) * self.wbytes]
             self.tx_id += 1
-            self.queue_tx.append((True, addrb, datab, strb, error_expected, self.tx_id))
+            event = Event()
+            events.append(event)
+            self.queue_tx.append(
+                _ObiTxOp(True, addrb, datab, strb, error_expected, self.tx_id, event)
+            )
 
         self.sync.set()
         self._idle.clear()
+        return events
+
+    def _leading_write(self) -> Optional[_ObiTxOp]:
+        if self._presented is not None and self._presented.write:
+            return self._presented
+        if self.outstanding and self.outstanding[0].write:
+            return self.outstanding[0]
+        if self.queue_tx and self.queue_tx[0].write:
+            return self.queue_tx[0]
+        return None
+
+    async def _await_prior_writes(self) -> None:
+        """Wait for earlier writes to complete before a blocking ``read()``.
+
+        ``read_nowait()`` does not do this, so queued reads can still overlap
+        in-flight writes on the bus.
+        """
+        while True:
+            op = self._leading_write()
+            if op is None:
+                return
+            await op.event.wait()
+            if op is self._leading_write():
+                await RisingEdge(self.clock)
 
     async def read(
         self,
@@ -217,19 +277,26 @@ class ObiHost(ObiBase):
         device: int = 0,
         index: int = -1,
     ) -> Union[bytes, int]:
-        """Read data from an OBI device."""
+        """Read data from an OBI device.
+
+        Waits for any earlier writes to finish first so the returned value is
+        coherent with those writes. Use :meth:`read_nowait` to issue a read
+        without that wait.
+        """
+        await self._await_prior_writes()
         rx_id = self.read_nowait(addr, data, error_expected, length, device, index)
         found = False
         ret: bytes = b""
         while not found:
             while self.queue_rx:
-                ret, tx_id = self.queue_rx.popleft()
+                ret_bytes, tx_id = self.queue_rx.popleft()
                 if rx_id == tx_id:
                     found = True
+                    ret = ret_bytes
                     break
             if not found:
-                await RisingEdge(self.clock)
-        await self._idle.wait()
+                self._rx_event.clear()
+                await self._rx_event.wait()
         for _ in range(self.intra_delay):
             await RisingEdge(self.clock)
         self.ret = ret
@@ -246,9 +313,10 @@ class ObiHost(ObiBase):
         device: int = 0,
         index: int = -1,
     ) -> int:
-        """Queue a read without waiting for completion. Returns the tx id."""
+        """Queue a read without waiting for completion. Returns the last tx id."""
         resolved = self.calc_address(addr, device, index)
         num_transactions = self.calc_length(length, data, self.rbytes)
+        last_tx_id = self.tx_id
 
         for i in range(num_transactions):
             addrb = resolved + i * self.rbytes
@@ -258,11 +326,17 @@ class ObiHost(ObiBase):
             else:
                 datab = data
             self.tx_id += 1
-            self.queue_tx.append((False, addrb, datab, -1, error_expected, self.tx_id))
+            last_tx_id = self.tx_id
+            event = Event()
+            self.queue_tx.append(
+                _ObiTxOp(
+                    False, addrb, datab, -1, error_expected, self.tx_id, event
+                )
+            )
 
         self.sync.set()
         self._idle.clear()
-        return self.tx_id
+        return last_tx_id
 
     async def poll(
         self,
@@ -272,7 +346,7 @@ class ObiHost(ObiBase):
         index: int = -1,
     ) -> None:
         """Repeatedly read *addr* until the returned data equals *data*."""
-        resolved = self.calc_address(addr, device, index)
+        resolved = self.calc_address(addr, device)
         label = self.format_addr(resolved, device)
         self.log.info(f"Poll  {self._format_addr_col(label)}")
         level_num = self.log.getEffectiveLevel()
@@ -289,16 +363,40 @@ class ObiHost(ObiBase):
     # --- Lifecycle / status --------------------------------------------------
 
     def _restart(self) -> None:
-        if self._run_coroutine_obj is not None:
-            self._run_coroutine_obj.kill()
-        if self._resp_coroutine_obj is not None:
-            self._resp_coroutine_obj.kill()
-            self._resp_coroutine_obj = None
-        if self.max_outstanding <= 1:
-            self._run_coroutine_obj = start_soon(self._run_sequential())
-        else:
-            self._run_coroutine_obj = start_soon(self._run_request())
-            self._resp_coroutine_obj = start_soon(self._run_response())
+        if self._a_coroutine_obj is not None:
+            self._a_coroutine_obj.kill()
+        if self._r_coroutine_obj is not None:
+            self._r_coroutine_obj.kill()
+        if self._rready_coroutine_obj is not None:
+            self._rready_coroutine_obj.kill()
+        self._presented = None
+        self._req_pause = 0
+        self._gnt_timeout = 0
+        self._resp_timeout = 0
+        self._a_wake.clear()
+        self._a_coroutine_obj = start_soon(self._run_a_channel())
+        self._r_coroutine_obj = start_soon(self._run_r_channel())
+        self._rready_coroutine_obj = start_soon(self._run_rready())
+
+    async def _run_rready(self) -> None:
+        """Drive the R-channel ready signal."""
+        self.bus.rready.value = 1
+        while True:
+            await RisingEdge(self.clock)
+            if not self.backpressure_rready:
+                self.bus.rready.value = 1
+                continue
+            stall = self.rready_delay
+            if stall:
+                self.bus.rready.value = 0
+                for _ in range(stall):
+                    await RisingEdge(self.clock)
+                self.bus.rready.value = 1
+
+    @property
+    def rready_delay(self) -> int:
+        """Number of cycles to hold rready low, or 0 to stay ready."""
+        return self._stall_cycles(self.backpressure_rready)
 
     @property
     def count_tx(self) -> int:
@@ -318,7 +416,11 @@ class ObiHost(ObiBase):
 
     @property
     def idle(self) -> bool:
-        return self.empty_tx and not self.outstanding
+        return (
+            self.empty_tx
+            and not self.outstanding
+            and self._presented is None
+        )
 
     def clear(self) -> None:
         """Clears the RX and TX queues"""
@@ -330,221 +432,162 @@ class ObiHost(ObiBase):
         await self._idle.wait()
 
     def _update_idle(self) -> None:
-        if not self.queue_tx and not self.outstanding:
+        if self.idle:
             self._idle.set()
 
-    # --- Sequential (max_outstanding == 1) implementation --------------------
+    def _deassert_req(self) -> None:
+        self.bus.req.value = 0
+        self.bus.we.value = 0
+        self.bus.addr.value = 0
+        self.bus.wdata.value = 0
+        self.bus.be.value = 0
+        if self.has_aid:
+            self.bus.aid.value = 0
 
-    async def _run_sequential(self):
+    def _drive_req(self, op: _ObiTxOp) -> None:
+        if op.addr < 0 or op.addr >= 2**self.address_width:
+            raise ValueError("Address out of range")
+
+        self.bus.req.value = 1
+        self.bus.we.value = op.write
+        self.bus.addr.value = op.addr
+        if self.has_aid:
+            self.bus.aid.value = op.tx_id & self.aid_mask
+
+        label = self.format_addr(op.addr)
+        if op.write:
+            data_int = int.from_bytes(op.data, byteorder="little")
+            self.log.info(f"Write {self._format_addr_col(label)}: 0x{data_int:08x}")
+            self.bus.wdata.value = data_int & self.wdata_mask
+            if -1 == op.strb:
+                self.bus.be.value = self.be_mask
+            else:
+                self.bus.be.value = op.strb & self.be_mask
+        else:
+            self.log.info(f"Read  {self._format_addr_col(label)}")
+            self.bus.wdata.value = 0
+            self.bus.be.value = self.be_mask
+
+    def _can_present(self) -> bool:
+        total = len(self.outstanding) + (1 if self._presented is not None else 0)
+        return bool(self.queue_tx) and total < self.max_outstanding
+
+    def _present_next(self) -> None:
+        if self._req_pause > 0:
+            self._req_pause -= 1
+            self._deassert_req()
+            return
+        if not self._can_present():
+            self._deassert_req()
+            self._update_idle()
+            return
+        if self.backpressure_req:
+            stall = self.req_delay
+            if stall:
+                self._req_pause = stall
+                self._deassert_req()
+                return
+        op = self.queue_tx.popleft()
+        self._drive_req(op)
+        self._presented = op
+        self._gnt_timeout = 0
+
+    # --- Decoupled A/R channel drivers ---------------------------------------
+
+    async def _run_a_channel(self) -> None:
+        """Drive the OBI request (A) channel with zero-bubble back-to-back beats."""
         await RisingEdge(self.clock)
         while True:
-            while not self.queue_tx:
-                self._idle.set()
+            while not self.queue_tx and self._presented is None:
+                self._deassert_req()
+                self._update_idle()
                 self.sync.clear()
                 await self.sync.wait()
 
-            (
-                write,
-                addr,
-                data,
-                strb,
-                error_expected,
-                tx_id,
-            ) = self.queue_tx.popleft()
+            await First(RisingEdge(self.clock), self._a_wake.wait())
+            if self._a_wake.is_set():
+                self._a_wake.clear()
+                if self._presented is None:
+                    self._present_next()
+                    continue
 
-            if addr < 0 or addr >= 2**self.address_width:
-                raise ValueError("Address out of range")
+            req_sample = bool(int(self.bus.req.value))
+            gnt_sample = bool(int(self.bus.gnt.value))
 
-            # --- OBI Request Phase (A-channel) ---
-            self.bus.req.value = 1
-            self.bus.we.value = write
-            self.bus.addr.value = addr
-            if self.has_aid:
-                self.bus.aid.value = tx_id & self.aid_mask
+            # Advance when the beat was accepted (req && gnt) or when idle.
+            if (req_sample and gnt_sample) or (not req_sample):
+                if req_sample and gnt_sample and self._presented is not None:
+                    self.outstanding.append(self._presented)
+                    self._presented = None
+                    self._gnt_timeout = 0
 
-            label = self.format_addr(addr)
-            if write:
-                data_int = int.from_bytes(data, byteorder="little")
-                self.log.info(f"Write {self._format_addr_col(label)}: 0x{data_int:08x}")
-                self.bus.wdata.value = data_int & self.wdata_mask
-                if -1 == strb:
-                    self.bus.be.value = self.be_mask
-                else:
-                    self.bus.be.value = strb & self.be_mask
-            else:
-                self.log.info(f"Read  {self._format_addr_col(label)}")
-                self.bus.wdata.value = 0
-                self.bus.be.value = self.be_mask
-
-            # Wait for grant (with timeout)
-            cycle_count = 0
-            await RisingEdge(self.clock)
-            while not self.bus.gnt.value:
-                await RisingEdge(self.clock)
-                cycle_count += 1
-                if self.timeout_cycles >= 0 and cycle_count >= self.timeout_cycles:
+                if self._presented is None:
+                    self._present_next()
+            elif self._presented is not None:
+                self._gnt_timeout += 1
+                if (
+                    self.timeout_cycles >= 0
+                    and self._gnt_timeout >= self.timeout_cycles
+                ):
+                    addr = self._presented.addr
                     msg = (
-                        f"Request timeout: No gnt after {cycle_count} cycles "
+                        f"Request timeout: No gnt after {self._gnt_timeout} cycles "
                         f"(addr=0x{addr:08x})"
                     )
                     self.log.critical(msg)
                     raise TimeoutError(msg)
 
-            # Request accepted, deassert req
-            self.bus.req.value = 0
-            self.bus.we.value = 0
-            self.bus.addr.value = 0
-            self.bus.wdata.value = 0
-            self.bus.be.value = 0
-            if self.has_aid:
-                self.bus.aid.value = 0
-
-            # --- OBI Response Phase (R-channel) ---
-            cycle_count = 0
-            while not self.bus.rvalid.value:
-                await RisingEdge(self.clock)
-                cycle_count += 1
-                if self.timeout_cycles >= 0 and cycle_count >= self.timeout_cycles:
-                    msg = (
-                        f"Response timeout: No rvalid after {cycle_count} cycles "
-                        f"(addr=0x{addr:08x})"
-                    )
-                    self.log.critical(msg)
-                    raise TimeoutError(msg)
-
-            self._check_error(error_expected, addr)
-
-            if not write:
-                ret = resolve_x_int(self.bus.rdata) & self.rdata_mask
-                self.log.info(f"Value read: 0x{ret:08x}")
-                if data != b"":
-                    data_int = int.from_bytes(data, byteorder="little")
-                    if data_int != ret:
-                        raise ValueError(
-                            f"Expected 0x{data_int:08x} doesn't match "
-                            f"returned 0x{ret:08x}"
-                        )
-                self.queue_rx.append((ret.to_bytes(self.rbytes, "little"), tx_id))
-
-            if not self.queue_tx:
-                self._idle.set()
-
-            # Wait for response handshake to complete (rvalid && rready)
-            await RisingEdge(self.clock)
-
-            self.sync.set()
-
-    # --- Pipelined (max_outstanding > 1) implementation ----------------------
-
-    async def _run_request(self):
+    async def _run_r_channel(self) -> None:
+        """Collect OBI responses (R channel) in strict order."""
         await RisingEdge(self.clock)
         while True:
-            while (not self.queue_tx) or (
-                len(self.outstanding) >= self.max_outstanding
-            ):
-                self.bus.req.value = 0
-                self.bus.we.value = 0
-                self.bus.addr.value = 0
-                self.bus.wdata.value = 0
-                self.bus.be.value = 0
-                if self.has_aid:
-                    self.bus.aid.value = 0
-                self._update_idle()
-                await RisingEdge(self.clock)
-
-            (
-                write,
-                addr,
-                data,
-                strb,
-                error_expected,
-                tx_id,
-            ) = self.queue_tx[0]
-
-            if addr < 0 or addr >= 2**self.address_width:
-                raise ValueError("Address out of range")
-
-            self.bus.req.value = 1
-            self.bus.we.value = write
-            self.bus.addr.value = addr
-            if self.has_aid:
-                self.bus.aid.value = tx_id & self.aid_mask
-
-            label = self.format_addr(addr)
-            if write:
-                data_int = int.from_bytes(data, byteorder="little")
-                self.log.info(f"Write {self._format_addr_col(label)}: 0x{data_int:08x}")
-                self.bus.wdata.value = data_int & self.wdata_mask
-                if -1 == strb:
-                    self.bus.be.value = self.be_mask
-                else:
-                    self.bus.be.value = strb & self.be_mask
-            else:
-                self.log.info(f"Read  {self._format_addr_col(label)}")
-                self.bus.wdata.value = 0
-                self.bus.be.value = self.be_mask
-
-            cycle_count = 0
             await RisingEdge(self.clock)
-            while not self.bus.gnt.value:
-                await RisingEdge(self.clock)
-                cycle_count += 1
-                if self.timeout_cycles >= 0 and cycle_count >= self.timeout_cycles:
+
+            if self.outstanding:
+                self._resp_timeout += 1
+                if (
+                    self.timeout_cycles >= 0
+                    and self._resp_timeout >= self.timeout_cycles
+                ):
+                    addr = self.outstanding[0].addr
                     msg = (
-                        f"Request timeout: No gnt after {cycle_count} cycles "
-                        f"(addr=0x{addr:08x})"
+                        f"Response timeout: No rvalid after {self._resp_timeout} "
+                        f"cycles (addr=0x{addr:08x})"
                     )
                     self.log.critical(msg)
                     raise TimeoutError(msg)
+            else:
+                self._resp_timeout = 0
 
-            # Request accepted
-            self.queue_tx.popleft()
-            self.outstanding.append((write, addr, data, error_expected, tx_id))
-
-            # Deassert req for one cycle so the device sees a clean req
-            # edge (avoids a delta-cycle race where a lingering req is granted
-            # twice). The device enforces a matching one-cycle grant gap.
-            self.bus.req.value = 0
-            self.bus.we.value = 0
-            self.bus.addr.value = 0
-            self.bus.wdata.value = 0
-            self.bus.be.value = 0
-            if self.has_aid:
-                self.bus.aid.value = 0
-            await RisingEdge(self.clock)
-
-    async def _run_response(self):
-        self.bus.rready.value = 1
-        await RisingEdge(self.clock)
-        while True:
-            while not self.bus.rvalid.value:
-                await RisingEdge(self.clock)
-
-            if not self.outstanding:
-                # Response with nothing outstanding - ignore this cycle
-                await RisingEdge(self.clock)
+            if not (self.bus.rvalid.value and self.bus.rready.value):
                 continue
 
-            write, addr, expected, error_expected, tx_id = self.outstanding.popleft()
+            if not self.outstanding:
+                continue
 
-            self._check_error(error_expected, addr)
+            op = self.outstanding.popleft()
+            self._resp_timeout = 0
 
-            if not write:
+            self._check_error(op.error_expected, op.addr)
+
+            if not op.write:
                 ret = resolve_x_int(self.bus.rdata) & self.rdata_mask
                 self.log.info(f"Value read: 0x{ret:08x}")
-                if expected != b"":
-                    data_int = int.from_bytes(expected, byteorder="little")
+                if op.data != b"":
+                    data_int = int.from_bytes(op.data, byteorder="little")
                     if data_int != ret:
                         raise ValueError(
                             f"Expected 0x{data_int:08x} doesn't match "
                             f"returned 0x{ret:08x}"
                         )
-                self.queue_rx.append((ret.to_bytes(self.rbytes, "little"), tx_id))
+                ret_bytes = ret.to_bytes(self.rbytes, "little")
+                self.queue_rx.append((ret_bytes, op.tx_id))
+                self._rx_event.set()
 
+            op.event.set()
             self._update_idle()
-
-            # Advance past the accepted response (rvalid && rready)
-            await RisingEdge(self.clock)
+            if self._presented is None and self._can_present():
+                self._a_wake.set()
 
     def _check_error(self, error_expected: bool, addr: int) -> None:
         err = bool(int(self.bus.err.value))

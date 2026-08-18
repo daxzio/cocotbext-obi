@@ -2,7 +2,8 @@
 
 The package ships a cocotb test suite that exercises the OBI VIP (host,
 device, RAM, monitor) against small SystemVerilog tops. Tests are driven by
-per-suite Makefiles that include cocotb's `Makefile.sim`.
+per-suite Makefiles that include `tests/rtlflo/cocotb_helper.mak` (same flow
+as `cocotbext-apb`).
 
 ## Prerequisites
 
@@ -34,8 +35,9 @@ A single suite:
 
 ```bash
 cd tests/test_basic
-make clean sim SIM=verilator
-make clean sim SIM=icarus WAVES=1   # dump waves
+make clean sim SIM=verilator WAVES=0
+make clean sim SIM=icarus           # WAVES=1 is the default
+make waves                          # open the dump in GTKWave
 ```
 
 Suites that generate RTL from RDL (via `../regblock.mak`):
@@ -59,6 +61,7 @@ make sim SIM=verilator
 | `test_pipelining` | Multiple outstanding transactions (`max_outstanding`), in-order completion, backpressure |
 | `test_addrmap` | Named + indexed register access via `AddressMap` / `addaddrmap()` (REGWIDTH 8/16/32) |
 | `test_poll` | `ObiHost.poll()` against a PeakRDL busy/start handshake |
+| `test_early_external_read` | Host read/write of a registered external memory (PeakRDL `external mem`), including independent `req` / `rready` backpressure |
 | `test_interface` | Same as `test_basic` via `ObiInterface` (skips without `cocotbext-interface`) |
 | `test_interface_noid` | `ObiInterface` against a DUT with no `aid`/`rid` (skips without the extra) |
 
@@ -99,9 +102,8 @@ async def test_my_feature(dut):
 
 `ObiHost(bus, clk, max_outstanding=N)` and `ObiDevice(bus, clk,
 max_outstanding=N)` enable up to *N* outstanding transactions with strict
-in-order completion. `max_outstanding=1` (default) uses a strictly sequential
-request/response loop and is fully backward compatible. See
-`tests/test_pipelining`.
+in-order completion. Default `max_outstanding=2`; set `1` for strictly
+sequential issue. See `tests/test_pipelining`.
 
 ## CI
 

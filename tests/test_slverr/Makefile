@@ -1,10 +1,12 @@
 SIM?=icarus
 TOPLEVEL_LANG=verilog
+WORK_BASE?=..
 
 TOPLEVEL = regblock
 MODULE = test_dut
 
-VERILOG_SOURCES = regblock*.sv
+INT_VERILOG_SOURCES += \
+	./regblock.sv \
 
 CPUIF?=obi-flat
 RDL_ARGS?=--err-if-bad-addr --err-if-bad-rw
@@ -13,13 +15,13 @@ ifeq ($(SIM),verilator)
 	# Only use regblock_wrapper if using regblock target (not etana)
 	# etana generates regblock.sv directly
 	ifeq ($(filter regblock,$(MAKECMDGOALS)),regblock)
-    	TOPLEVEL = regblock_wrapper
+		TOPLEVEL = regblock_wrapper
 	endif
 endif
 
-COCOTB_TEST_MODULES = test_dut
+COCOTB_SOURCES = \
 
-include $(shell cocotb-config --makefiles)/Makefile.sim
+include ${WORK_BASE}/rtlflo/cocotb_helper.mak
 
 etana:
 	rm -rf regblock*.sv
@@ -34,7 +36,3 @@ regblock:
 	else \
 		echo "hwif_wrapper_tool not found at '$(HWIF_WRAPPER_TOOL)' (set HWIF_WRAPPER_TOOL); skipping wrapper generation"; \
 	fi
-
-clean::
-	rm -rf sim_build/ __pycache__/ results.xml *.fst *.vcd
-

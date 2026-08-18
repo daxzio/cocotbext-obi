@@ -31,6 +31,7 @@ Two-phase handshake on a single channel set:
 cocotbext/obi/       # Library source (standalone)
 tests/               # cocotb testbenches
   interfaces/        # Shared helpers: clkrst.py (ClkReset)
+  rtlflo/            # Shared sim helper (WAVES, make waves, Makefile.sim)
   test_*/            # Per-suite dirs (Makefile + test_dut.py + RTL)
 scripts/             # update_copyright_year.py
 .github/workflows/   # CI (lint, mypy, sim matrix, PyPI release)
@@ -98,12 +99,11 @@ the MIT header.
 ## Architecture notes / conventions
 
 - `ObiHost`, `ObiDevice`, `ObiMonitor` all inherit `ObiBase`.
-- **Pipelining**: `max_outstanding=1` (default) runs the proven strictly
-  sequential path (`_run_sequential`). `max_outstanding>1` runs split
-  request/response coroutines (`_run_request`/`_run_response` on the host,
-  `_run_pipelined` on the device). The pipelined handshake deliberately inserts
-  a one-cycle req/grant gap on **both** sides to avoid a delta-cycle race where
-  a lingering `req` is granted twice - keep that invariant if you touch it.
+- **Pipelining**: default `max_outstanding=2`. Host always uses decoupled
+  `_run_a_channel` / `_run_r_channel` coroutines (the same path for every
+  outstanding depth). Device uses a single `_run()` that grants when
+  `len(pending) < max_outstanding`. Blocking `read()` waits for earlier
+  writes to complete; `read_nowait()` / `write_nowait()` do not.
 - Responses are matched **in order** via the host's `outstanding` deque and
   `queue_rx` tx-ids; the code does not rely on `aid`/`rid` for matching (aid
   width is often 1 bit in the test tops).
@@ -132,7 +132,8 @@ Requires a simulator (Icarus/Verilator) on PATH. Pure-Python unit tests
 ```bash
 make test                 # all suites, SIM=icarus verilator
 make test SIMS=icarus
-cd tests/test_basic && make clean sim SIM=verilator   # single suite
+cd tests/test_basic && make clean sim SIM=verilator WAVES=0   # single suite
+cd tests/test_basic && make sim && make waves                 # dump + GTKWave
 pytest tests/test_format_addr.py -v                   # AddressMap unit tests
 ```
 
@@ -175,7 +176,7 @@ reusable workflows.
 - BFM-to-BFM suites (`test_device`, `test_ram`, `test_memdump`, `test_pipelining`)
   use a loopback DUT (`s_obi` host / `m_obi` device); `test_device/dut.sv` is the
   shared top for the first three.
-- The pipelined host/device paths are cycle-level and must be validated with a
-  real simulator (`make test`); logic changes there cannot be checked by
-  import/compile alone.
+- The host A/R coroutines and device responder are cycle-level and must be
+  validated with a real simulator (`make test`); logic changes there cannot be
+  checked by import/compile alone.
 - Only create commits when explicitly asked.

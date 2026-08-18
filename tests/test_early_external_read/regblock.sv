@@ -11,7 +11,7 @@ module regblock #(
 
         input wire s_obi_req,
         output logic s_obi_gnt,
-        input wire [2:0] s_obi_addr,
+        input wire [7:0] s_obi_addr,
         input wire s_obi_we,
         input wire [3:0] s_obi_be,
         input wire [31:0] s_obi_wdata,
@@ -22,8 +22,14 @@ module regblock #(
         output logic s_obi_err,
         output logic [ID_WIDTH-1:0] s_obi_rid,
 
-        output logic hwif_out_start,
-        input wire hwif_in_busy
+        output logic [7:0] hwif_out_ext_mem_addr,
+        output logic hwif_out_ext_mem_req,
+        input logic [31:0] hwif_in_ext_mem_rd_data,
+        input logic hwif_in_ext_mem_rd_ack,
+        input logic hwif_in_ext_mem_wr_ack,
+        output logic hwif_out_ext_mem_req_is_wr,
+        output logic [31:0] hwif_out_ext_mem_wr_data,
+        output logic [31:0] hwif_out_ext_mem_wr_biten
     );
 
     //--------------------------------------------------------------------------
@@ -31,7 +37,7 @@ module regblock #(
     //--------------------------------------------------------------------------
     logic cpuif_req;
     logic cpuif_req_is_wr;
-    logic [2:0] cpuif_addr;
+    logic [7:0] cpuif_addr;
     logic [31:0] cpuif_wr_data;
     logic [31:0] cpuif_wr_biten;
     logic cpuif_req_stall_wr;
@@ -90,7 +96,7 @@ module regblock #(
                 is_active <= 1'b1;
                 cpuif_req <= 1'b1;
                 cpuif_req_is_wr <= s_obi_we;
-                cpuif_addr <= { s_obi_addr[2:2], 2'b0};
+                cpuif_addr <= { s_obi_addr[7:2], 2'b0};
                 cpuif_wr_data <= s_obi_wdata;
                 rid_q <= s_obi_aid;
                 for (int i = 0; i < 4; i++) begin
@@ -128,10 +134,30 @@ module regblock #(
     assign s_obi_gnt = ~is_active | obi_finish;
 
     logic cpuif_req_masked;
+    logic external_req;
+    logic external_pending;
+    logic external_wr_ack;
+    logic external_rd_ack;
+//     always_ff @(posedge clk) begin
+    always @(posedge clk) begin
+        if(rst) begin
+            external_pending <= '0;
+        end else begin
+            if(external_req & ~external_wr_ack & ~external_rd_ack) external_pending <= '1;
+            else if(external_wr_ack | external_rd_ack) external_pending <= '0;
+            `ifndef SYNTHESIS
+                assert_bad_ext_wr_ack: assert($isunknown(external_wr_ack) || !external_wr_ack || (external_pending | external_req))
+                    else $error("An external wr_ack strobe was asserted when no external request was active");
+                assert_bad_ext_rd_ack: assert($isunknown(external_rd_ack) || !external_rd_ack || (external_pending | external_req))
+                    else $error("An external rd_ack strobe was asserted when no external request was active");
+            `endif
+        end
+    end
 
     // Read & write latencies are balanced. Stalls not required
-    assign cpuif_req_stall_rd = '0;
-    assign cpuif_req_stall_wr = '0;
+    // except if external
+    assign cpuif_req_stall_rd = external_pending;
+    assign cpuif_req_stall_wr = external_pending;
     assign cpuif_req_masked = cpuif_req
                             & !(!cpuif_req_is_wr & cpuif_req_stall_rd)
                             & !(cpuif_req_is_wr & cpuif_req_stall_wr);
@@ -139,8 +165,11 @@ module regblock #(
     //--------------------------------------------------------------------------
     // Address Decode
     //--------------------------------------------------------------------------
-    logic decoded_reg_strb_start;
-    logic decoded_reg_strb_busy;
+    logic decoded_reg_strb_ext_mem;
+    logic decoded_strb_is_external;
+
+    logic [7:0] decoded_addr;
+
     logic decoded_req;
     logic decoded_req_is_wr;
     /* verilator lint_off UNUSEDSIGNAL */
@@ -152,11 +181,17 @@ module regblock #(
         /* verilator lint_off UNUSEDSIGNAL */
         integer next_cpuif_addr;
         /* verilator lint_on UNUSEDSIGNAL */
-        decoded_reg_strb_start = cpuif_req_masked & (cpuif_addr == 3'h0);
-        decoded_reg_strb_busy = cpuif_req_masked & (cpuif_addr == 3'h4) & !cpuif_req_is_wr;
+        logic is_external;
+        is_external = '0;
+        decoded_reg_strb_ext_mem = cpuif_req_masked;
+        is_external |= cpuif_req_masked;
+        decoded_strb_is_external = is_external;
+        external_req = is_external;
     end
 
     // Pass down signals to next stage
+    assign decoded_addr = cpuif_addr;
+
     assign decoded_req = cpuif_req_masked;
     assign decoded_req_is_wr = cpuif_req_is_wr;
     assign decoded_wr_data = cpuif_wr_data;
@@ -167,41 +202,26 @@ module regblock #(
     // Field storage declarations
     //--------------------------------------------------------------------------
 
-    // Field: regblock.START.START
-    logic field_storage_start_value;
-    logic field_combo_start_next;
-    logic field_combo_start_load_next;
     //--------------------------------------------------------------------------
     // Field logic
     //--------------------------------------------------------------------------
-    always @(*) begin
-        logic next_c;
-        logic load_next_c;
-        next_c = field_storage_start_value;
-        load_next_c = '0;
-        if(decoded_reg_strb_start && decoded_req_is_wr) begin // SW write
-            next_c = (field_storage_start_value & ~decoded_wr_biten[0:0]) | (decoded_wr_data[0:0] & decoded_wr_biten[0:0]);
-            load_next_c = '1;
-        end else begin // singlepulse clears back to 0
-            next_c = '0;
-            load_next_c = '1;
-        end
-        field_combo_start_next = next_c;
-        field_combo_start_load_next = load_next_c;
-    end
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            field_storage_start_value <= 1'h0;
-        end else if(field_combo_start_load_next) begin
-            field_storage_start_value <= field_combo_start_next;
-        end
-    end
-    assign hwif_out_start = field_storage_start_value;
+
+    assign hwif_out_ext_mem_addr = decoded_addr[7:0];
+    assign hwif_out_ext_mem_req = decoded_reg_strb_ext_mem;
+    assign hwif_out_ext_mem_req_is_wr = decoded_reg_strb_ext_mem & decoded_req_is_wr;
+    assign hwif_out_ext_mem_wr_data = decoded_wr_data;
+    assign hwif_out_ext_mem_wr_biten = decoded_wr_biten;
 
     //--------------------------------------------------------------------------
     // Write response
     //--------------------------------------------------------------------------
-    assign cpuif_wr_ack = decoded_req & decoded_req_is_wr;
+    always @(*) begin
+        logic wr_ack;
+        wr_ack = '0;
+        wr_ack |= hwif_in_ext_mem_wr_ack;
+        external_wr_ack = wr_ack;
+    end
+    assign cpuif_wr_ack = external_wr_ack | (decoded_req & decoded_req_is_wr & ~decoded_strb_is_external);
     // Write error: decoded (bad addr/rw) or external mem wr_err from err_support
     assign cpuif_wr_err = '0;
 
@@ -209,15 +229,18 @@ module regblock #(
 // Readback
 //--------------------------------------------------------------------------
     logic readback_external_rd_ack;
-    assign readback_external_rd_ack = 0;
+    logic readback_external_rd_ack_c;
+    always @(*) begin
+        logic rd_ack;
+        rd_ack = '0;
+        rd_ack |= hwif_in_ext_mem_rd_ack;
+        readback_external_rd_ack_c = rd_ack;
+    end
+
+    assign readback_external_rd_ack = readback_external_rd_ack_c;
 
     logic readback_external_rd_err;
     assign readback_external_rd_err = '0;
-    // Readback mux address
-    // When external accesses are present, hold address stable so readback mux can
-    // continue selecting the correct external data while waiting for rd_ack.
-    logic [2:0] rd_mux_addr;
-    assign rd_mux_addr = cpuif_addr;
 
     logic readback_err;
     logic readback_done;
@@ -227,18 +250,14 @@ always @(*) begin
         // A regular block-local temp is sufficient here since logic is purely combinational.
         logic [31:0] readback_data_var;
         readback_data_var = '0;
-        if(rd_mux_addr == 3'h0) begin
-            readback_data_var[0] = field_storage_start_value;
-        end
-        if(rd_mux_addr == 3'h4) begin
-            readback_data_var[0] = hwif_in_busy;
-        end
+        readback_data_var = hwif_in_ext_mem_rd_data;
         readback_data = readback_data_var;
-        readback_done = decoded_req & ~decoded_req_is_wr;
+        readback_done = decoded_req & ~decoded_req_is_wr & ~decoded_strb_is_external;
         readback_err = '0;
     end
 
-    assign cpuif_rd_ack = readback_done;
+    assign external_rd_ack = readback_external_rd_ack;
+    assign cpuif_rd_ack = readback_done | readback_external_rd_ack;
     assign cpuif_rd_data = readback_data;
     assign cpuif_rd_err = readback_err | readback_external_rd_err;
 endmodule

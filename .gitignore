@@ -12,6 +12,7 @@ sim_build/
 results.xml
 .coverage
 *.log
+repos/
 
 
 

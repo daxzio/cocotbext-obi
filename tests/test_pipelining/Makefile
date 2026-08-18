@@ -1,18 +1,13 @@
 SIM?=icarus
 TOPLEVEL_LANG=verilog
+WORK_BASE?=..
 
 TOPLEVEL = obi_top
 MODULE = test_dut
 
-VERILOG_SOURCES = $(PWD)/obi_top.sv
+INT_VERILOG_SOURCES += \
+	./obi_top.sv \
 
-COCOTB_TEST_MODULES = test_dut
+COCOTB_SOURCES = \
 
-include $(shell cocotb-config --makefiles)/Makefile.sim
-
-clean::
-	rm -rf sim_build/ __pycache__/ results.xml *.fst *.vcd
-
-
-
-
+include ${WORK_BASE}/rtlflo/cocotb_helper.mak

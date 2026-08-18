@@ -28,16 +28,16 @@ class ClkReset:
         """Run clock indefinitely"""
         while True:
             self.clk.value = 0
-            await Timer(self.period // 2, units="ns")
+            await Timer(self.period // 2, "ns")
             self.clk.value = 1
-            await Timer(self.period // 2, units="ns")
+            await Timer(self.period // 2, "ns")
 
     async def _do_reset(self):
         """Apply reset at start"""
         self.rst.value = self.reset_sense
-        await Timer(self.period * 10, units="ns")
+        await Timer(self.period * 10, "ns")
         self.rst.value = 1 - self.reset_sense
-        await Timer(self.period, units="ns")
+        await Timer(self.period, "ns")
 
     async def wait_clkn(self, n):
         """Wait for n clock cycles"""

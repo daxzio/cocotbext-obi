@@ -53,9 +53,8 @@ class ObiDevice(ObiBase):
     size_bytes:
         Size of the auto-created backing memory when *target* is not given.
     max_outstanding:
-        Maximum number of accepted-but-unanswered requests. ``1`` (default)
-        uses a strictly sequential responder; ``>1`` enables pipelining with
-        strict in-order responses.
+        Maximum number of accepted-but-unanswered requests. Default ``2``.
+        Responses are returned in strict order.
     """
 
     def __init__(
@@ -64,7 +63,7 @@ class ObiDevice(ObiBase):
         clock: Any,
         target=None,
         size_bytes: Optional[int] = None,
-        max_outstanding: int = 1,
+        max_outstanding: int = 2,
         autostart: bool = True,
         **kwargs,
     ) -> None:
@@ -78,14 +77,12 @@ class ObiDevice(ObiBase):
 
         self.max_outstanding = max(1, int(max_outstanding))
 
-        # Initialize outputs
         self.bus.gnt.value = 0
         self.bus.rvalid.value = 0
         self.bus.rdata.value = 0
         self.bus.err.value = 0
         self.write_rid(0)
 
-        self._active: bool = False
         self._run_coroutine_obj: Any = None
         if autostart:
             self._restart()
@@ -93,10 +90,7 @@ class ObiDevice(ObiBase):
     def _restart(self) -> None:
         if self._run_coroutine_obj is not None:
             self._run_coroutine_obj.kill()
-        if self.max_outstanding <= 1:
-            self._run_coroutine_obj = start_soon(self._run_sequential())
-        else:
-            self._run_coroutine_obj = start_soon(self._run_pipelined())
+        self._run_coroutine_obj = start_soon(self._run())
 
     def start(self) -> None:
         """(Re)start the responder coroutine."""
@@ -129,52 +123,8 @@ class ObiDevice(ObiBase):
             self.log.warning(f"Access 0x{addr:08x} Invalid: {e}")
             return (aid, 0, 1)
 
-    # --- Sequential (max_outstanding == 1) implementation --------------------
-
-    async def _run_sequential(self):
-        await RisingEdge(self.clock)
-        while True:
-            await RisingEdge(self.clock)
-
-            # Check req BEFORE clearing gnt to avoid a race condition with
-            # Verilator, which may schedule the host coroutine before the
-            # device; set gnt immediately when req is present.
-            self.log.debug(f"req: {self.bus.req.value}, active: {self._active}")
-            if (self.sig_int(self.bus.req) == 1) and not self._active:
-                self._active = True
-                self.bus.gnt.value = 1
-                addr = self.sig_int(self.bus.addr)
-                we = self.sig_int(self.bus.we) == 1
-                be = self.sig_int(self.bus.be)
-                wdata = self.sig_int(self.bus.wdata)
-                aid = self.read_aid()
-
-                self.write_rid(aid)
-
-                # Apply delay for backpressure
-                for _ in range(self.delay):
-                    await RisingEdge(self.clock)
-
-                rid, rdata, err = await self._process(addr, we, be, wdata, aid)
-                self.bus.rvalid.value = 1
-                self.bus.err.value = err
-                self.bus.rdata.value = rdata
-                self.write_rid(rid)
-            else:
-                self.bus.gnt.value = 0
-
-            # Complete response when host accepts
-            if (
-                self.sig_int(self.bus.rvalid) == 1
-                and self.sig_int(self.bus.rready) == 1
-            ):
-                self.bus.rvalid.value = 0
-                self.bus.err.value = 0
-                self._active = False
-
-    # --- Pipelined (max_outstanding > 1) implementation ----------------------
-
-    async def _run_pipelined(self):
+    async def _run(self):
+        """Decoupled grant and response with back-to-back acceptance."""
         self.bus.gnt.value = 0
         self.bus.rvalid.value = 0
         self.bus.rdata.value = 0
@@ -182,21 +132,26 @@ class ObiDevice(ObiBase):
         self.write_rid(0)
 
         pending: deque[tuple[int, int, int]] = deque()
-        granted_prev = False
+        gnt_stall = 0
         await RisingEdge(self.clock)
-        while True:
-            # Optionally insert a bubble this cycle for backpressure.
-            bubble = self.backpressure and (self.delay > 0)
 
+        while True:
             req = self.sig_int(self.bus.req) == 1
-            can_accept = (len(pending) < self.max_outstanding) and not bubble
-            # Enforce a one-cycle gap between grants so a req that lingers high
-            # for an extra cycle (delta-cycle race) is never granted twice.
-            grant = req and can_accept and not granted_prev
-            granted_prev = grant
+            can_accept = len(pending) < self.max_outstanding
+            grant = False
+
+            if gnt_stall > 0:
+                gnt_stall -= 1
+            elif req and can_accept:
+                stall = self.gnt_delay
+                if stall:
+                    gnt_stall = stall - 1
+                else:
+                    grant = True
+
             self.bus.gnt.value = 1 if grant else 0
 
-            present = bool(pending) and not bubble
+            present = bool(pending)
             if present:
                 rid, rdata, err = pending[0]
                 self.bus.rvalid.value = 1

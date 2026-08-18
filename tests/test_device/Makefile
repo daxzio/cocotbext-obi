@@ -1,27 +1,13 @@
 SIM?=icarus
 TOPLEVEL_LANG=verilog
+WORK_BASE?=..
 
 TOPLEVEL = dut
 MODULE = test_dut
 
-VERILOG_SOURCES = $(PWD)/dut.sv
+INT_VERILOG_SOURCES += \
 
-COCOTB_TEST_MODULES = test_dut
+COCOTB_SOURCES = \
+	./dut.sv
 
-ifeq ($(WAVES),1)
-	ifeq ($(SIM),verilator)
-		PLUSARGS += --trace
-		EXTRA_ARGS += --trace # vcd format
-		EXTRA_ARGS += --trace-fst
-		EXTRA_ARGS += --trace-structs
-	endif
-endif
-
-include $(shell cocotb-config --makefiles)/Makefile.sim
-
-clean::
-	rm -rf sim_build/ __pycache__/ results.xml *.fst *.vcd
-
-
-
-
+include ${WORK_BASE}/rtlflo/cocotb_helper.mak

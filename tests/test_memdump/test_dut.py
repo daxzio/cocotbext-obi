@@ -8,7 +8,7 @@ from cocotbext.obi.obi_device import ObiDevice
 
 @cocotb.test()
 async def test_memdump(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, "ns").start())
 
     # Reset
     dut.rst.value = 1
