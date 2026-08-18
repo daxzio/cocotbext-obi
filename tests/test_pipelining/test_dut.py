@@ -23,6 +23,7 @@ class testbench:
         self.dut = dut
 
         self.sbus = ObiBus.from_prefix(dut, "s_obi")
+        self.mbus = ObiBus.from_prefix(dut, "m_obi")
         clk_name = "clk"
 
         # Create host with specified max_outstanding
@@ -32,7 +33,7 @@ class testbench:
 
         # Create device with specified max_outstanding
         self.s = ObiDevice(
-            self.sbus, getattr(dut, clk_name), max_outstanding=max_outstanding_device
+            self.mbus, getattr(dut, clk_name), max_outstanding=max_outstanding_device
         )
         region = MemoryRegion(2**self.s.address_width)
         self.s.target = region

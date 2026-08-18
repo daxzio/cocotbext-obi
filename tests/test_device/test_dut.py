@@ -19,6 +19,7 @@ class testbench:
         self.dut = dut
 
         self.sbus = ObiBus.from_prefix(dut, "s_obi")
+        self.mbus = ObiBus.from_prefix(dut, "m_obi")
         clk_name = "clk"
         self.m = ObiHost(self.sbus, getattr(dut, clk_name))
 
@@ -29,7 +30,7 @@ class testbench:
 @test()
 async def test_obi_memdump(dut):
     tb = testbench(dut, reset_sense=1)
-    tb.s = ObiDevice(tb.sbus, getattr(dut, "clk"))
+    tb.s = ObiDevice(tb.mbus, getattr(dut, "clk"))
     region = MemoryRegion(2**tb.s.address_width)
     tb.s.target = region
 
@@ -78,7 +79,7 @@ async def test_obi_memdump(dut):
 @test()
 async def test_obi_device(dut):
     tb = testbench(dut, reset_sense=1)
-    tb.s = ObiDevice(tb.sbus, getattr(dut, "clk"))
+    tb.s = ObiDevice(tb.mbus, getattr(dut, "clk"))
     region = MemoryRegion(2**tb.s.address_width)
     tb.s.target = region
 
@@ -132,7 +133,7 @@ async def test_obi_device(dut):
 @test()
 async def test_obi_ram(dut):
     tb = testbench(dut, reset_sense=1)
-    tb.s = ObiRam(tb.sbus, getattr(dut, "clk"))
+    tb.s = ObiRam(tb.mbus, getattr(dut, "clk"))
 
     await tb.cr.wait_clkn(20)
 

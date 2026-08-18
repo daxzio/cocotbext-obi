@@ -1,10 +1,10 @@
 SIM?=icarus
 TOPLEVEL_LANG=verilog
 
-TOPLEVEL = obi_top
+TOPLEVEL = dut
 MODULE = test_dut
 
-VERILOG_SOURCES = $(PWD)/obi_top.sv
+VERILOG_SOURCES = $(PWD)/dut.sv
 
 COCOTB_TEST_MODULES = test_dut
 

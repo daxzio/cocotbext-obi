@@ -5,6 +5,7 @@ dist/
 build/
 .pytest_cache/
 .tox/
+venv.*/
 *.vcd
 *.fst
 sim_build/

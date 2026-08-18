@@ -1,4 +1,4 @@
-module obi_top (
+module dut (
     input  wire clk,
     input  wire rst,
 
@@ -30,6 +30,10 @@ module obi_top (
     input  wire        m_obi_err,
     input  wire [0:0]  m_obi_rid
 );
+
+// Loopback so each VIP drives DUT inputs and samples DUT outputs.
+// A pin-only s_obi_* shell fails BFM-to-BFM suites because the
+// simulator cannot deposit onto undriven DUT outputs.
 
 assign m_obi_req    = s_obi_req;
 assign m_obi_addr   = s_obi_addr;

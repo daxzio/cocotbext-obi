@@ -53,7 +53,7 @@ make sim SIM=verilator
 | `test_basic` | Basic host read/write against a PeakRDL regblock (32-bit) |
 | `test_basic_64` | 64-bit data-width variant |
 | `test_slverr` | OBI `err` response handling (read-only / write-only violations, exception control) |
-| `test_slave` | `ObiDevice` / `ObiRam` / `MemoryRegion` targets, byte strobes, backpressure, `ObiMonitor` |
+| `test_device` | `ObiDevice` / `ObiRam` / `MemoryRegion` targets, byte strobes, backpressure, `ObiMonitor` |
 | `test_ram` | Bulk read/write against an `ObiDevice` sized with `size_bytes` |
 | `test_memdump` | Memory prefill + read-back dump |
 | `test_pipelining` | Multiple outstanding transactions (`max_outstanding`), in-order completion, backpressure |

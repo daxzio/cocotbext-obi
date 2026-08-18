@@ -173,8 +173,9 @@ reusable workflows.
 
 ## Gotchas
 
-- The test tops (`obi_top.sv`) are pin-only shells; the host **and** device
-  BFMs both drive the same `s_obi_*` pins.
+- BFM-to-BFM suites (`test_device`, `test_ram`, `test_memdump`, `test_pipelining`)
+  use a loopback DUT (`s_obi` host / `m_obi` device); `test_device/dut.sv` is the
+  shared top for the first three.
 - The pipelined host/device paths are cycle-level and must be validated with a
   real simulator (`make test`); logic changes there cannot be checked by
   import/compile alone.

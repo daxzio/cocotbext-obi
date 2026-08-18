@@ -19,8 +19,9 @@ async def test_ram_bulk_rw(dut):
     dut.rst.value = 0
 
     bus = ObiBus.from_prefix(dut, "s_obi")
+    dbus = ObiBus.from_prefix(dut, "m_obi")
     host = ObiHost(bus, dut.clk)
-    device = ObiDevice(bus, dut.clk, size_bytes=1024)
+    device = ObiDevice(dbus, dut.clk, size_bytes=1024)
     device.start()
 
     # Write 256 bytes pattern

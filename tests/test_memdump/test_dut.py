@@ -17,8 +17,9 @@ async def test_memdump(dut):
     dut.rst.value = 0
 
     bus = ObiBus.from_prefix(dut, "s_obi")
+    dbus = ObiBus.from_prefix(dut, "m_obi")
     host = ObiHost(bus, dut.clk)
-    device = ObiDevice(bus, dut.clk, size_bytes=256)
+    device = ObiDevice(dbus, dut.clk, size_bytes=256)
     device.start()
 
     # Prefill memory pattern

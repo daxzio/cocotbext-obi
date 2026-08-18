@@ -33,7 +33,7 @@ test_all:
 		(cd tests/test_basic && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 		(cd tests/test_basic_64 && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 		(cd tests/test_slverr && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
-		(cd tests/test_slave && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
+		(cd tests/test_device && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 		(cd tests/test_ram && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 		(cd tests/test_memdump && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
 		(cd tests/test_pipelining && $(MAKE) clean sim SIM=$$sim) || exit $$?; \
