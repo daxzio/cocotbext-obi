@@ -6,6 +6,7 @@ addrmap top #(
     default accesswidth = REGWIDTH;
 
     external mem {
+        early_external_read = true;
         memwidth = REGWIDTH;
         mementries = N_REGS;
         sw = rw;

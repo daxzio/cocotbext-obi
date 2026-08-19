@@ -44,37 +44,57 @@ module regblock #(
     logic cpuif_wr_err;
 
 
-    // State & holding regs
-    logic is_active; // A request is being served (not yet fully responded)
-    logic rsp_pending; // response stalled: manager was not ready when it completed
+    // Two-stage OBI pipeline: accept -> one-cycle cpuif_req pulse -> ack
+    // (combo or delayed). cpuif_req is never held, so SW strobes and external
+    // hwif requests are not re-issued. Delayed ack is skidded in exec_held if R
+    // is stalled.
+    //
+    // Combo-ack registers (internal FFs): rvalid is forwarded on the ack cycle,
+    // so A (req&&gnt) is followed by R on the next clock. rsp_valid only holds
+    // the beat when rready is low. OBI R-5: rvalid is not combinational from
+    // the same-cycle accept (cpuif_req is registered).
     logic [7:0] rsp_rdata_q;
     logic rsp_err_q;
+    logic rsp_valid;
     logic [$bits(s_obi_rid)-1:0] rid_q;
+    logic [$bits(s_obi_rid)-1:0] rid_inflight;
 
-    // The response is presented in the same cycle the regblock acknowledges, so a
-    // transaction costs no more than the interface minimum. The rsp_* registers
-    // only take over when the manager stalls the R channel with rready low.
-    // Gating on is_active is what keeps this legal: is_active is set on the edge the
-    // address phase completes, so rvalid can only rise in a later cycle (OBI R-5).
-    logic rsp_ack;
-    assign rsp_ack = is_active & ~rsp_pending & (cpuif_rd_ack | cpuif_wr_ack);
+    logic exec_valid;
+    logic exec_held;
+    logic [7:0] exec_rdata_q;
+    logic exec_err_q;
+    logic [$bits(s_obi_rid)-1:0] exec_rid_q;
 
-    // Back-to-back accept: when the R handshake completes and the manager already
-    // has the next req asserted, take the new address phase in the same cycle
-    // instead of forcing a one-cycle bubble (processor-style issue while !gnt).
-    logic obi_finish;
+    logic cpuif_ack;
     logic obi_accept;
-    assign obi_finish = (rsp_pending | rsp_ack) & s_obi_rready;
-    assign obi_accept = s_obi_req & (~is_active | obi_finish);
+    logic obi_rdone;
+    logic rsp_take;
+    logic exec_result_valid;
+    logic presenting_live;
+    assign cpuif_ack = cpuif_rd_ack | cpuif_wr_ack;
+    assign exec_result_valid = exec_held | (exec_valid & cpuif_ack);
+    assign presenting_live = exec_result_valid & ~rsp_valid;
+    assign s_obi_rvalid = rsp_valid | presenting_live;
+    assign s_obi_rdata = rsp_valid ? rsp_rdata_q : (exec_held ? exec_rdata_q : cpuif_rd_data);
+    assign s_obi_err = rsp_valid ? rsp_err_q : (exec_held ? exec_err_q : (cpuif_rd_err | cpuif_wr_err));
+    assign s_obi_rid = rsp_valid ? rid_q : (exec_held ? exec_rid_q : rid_inflight);
+    assign obi_rdone = s_obi_rvalid & s_obi_rready;
+    assign rsp_take = exec_result_valid & (~rsp_valid | s_obi_rready);
+    assign s_obi_gnt = ~rst & (~exec_valid | rsp_take);
+    assign obi_accept = s_obi_req & s_obi_gnt;
 
-    // Latch AID on accept to echo back the response
     always_ff @(posedge clk) begin
         if (rst) begin
-            is_active <= 1'b0;
-            rsp_pending <= 1'b0;
+            rsp_valid <= 1'b0;
             rsp_rdata_q <= '0;
             rsp_err_q <= 1'b0;
             rid_q <= '0;
+            rid_inflight <= '0;
+            exec_valid <= 1'b0;
+            exec_held <= 1'b0;
+            exec_rdata_q <= '0;
+            exec_err_q <= '0;
+            exec_rid_q <= '0;
 
             cpuif_req <= '0;
             cpuif_req_is_wr <= '0;
@@ -82,49 +102,48 @@ module regblock #(
             cpuif_wr_data <= '0;
             cpuif_wr_biten <= '0;
         end else begin
-            // defaults
-            cpuif_req <= 1'b0;
+            cpuif_req <= obi_accept;
 
             if (obi_accept) begin
-                is_active <= 1'b1;
-                cpuif_req <= 1'b1;
+                exec_valid <= 1'b1;
                 cpuif_req_is_wr <= s_obi_we;
                 cpuif_addr <= s_obi_addr[1:0];
                 cpuif_wr_data <= s_obi_wdata;
-                rid_q <= s_obi_aid;
+                rid_inflight <= s_obi_aid;
                 for (int i = 0; i < 1; i++) begin
                     cpuif_wr_biten[i*8 +: 8] <= {8{ s_obi_be[i] }};
                 end
-            end else if (obi_finish) begin
-                is_active <= 1'b0;
+            end else if (rsp_take) begin
+                exec_valid <= 1'b0;
             end
 
-            // Capture the response only if the manager cannot accept it this cycle
-            if (rsp_ack && !s_obi_rready) begin
-                rsp_pending <= 1'b1;
-                rsp_rdata_q <= cpuif_rd_data;
-                rsp_err_q <= cpuif_rd_err | cpuif_wr_err;
-                // NOTE: Keep 'is_active' asserted until the external R handshake completes
+            if (rsp_take) begin
+                exec_held <= 1'b0;
+            end else if (exec_valid && cpuif_ack && !exec_held) begin
+                exec_held <= 1'b1;
+                exec_rdata_q <= cpuif_rd_data;
+                exec_err_q <= cpuif_rd_err | cpuif_wr_err;
+                exec_rid_q <= rid_inflight;
             end
 
-            // Complete external R-channel handshake only if manager ready.
-            // rvalid itself does not depend on rready (R-21.3).
-            if (obi_finish) begin
-                rsp_pending <= 1'b0;
+            if (rsp_valid) begin
+                if (s_obi_rready) begin
+                    if (exec_result_valid) begin
+                        rsp_rdata_q <= exec_held ? exec_rdata_q : cpuif_rd_data;
+                        rsp_err_q <= exec_held ? exec_err_q : (cpuif_rd_err | cpuif_wr_err);
+                        rid_q <= exec_held ? exec_rid_q : rid_inflight;
+                    end else begin
+                        rsp_valid <= 1'b0;
+                    end
+                end
+            end else if (presenting_live && !s_obi_rready) begin
+                rsp_valid <= 1'b1;
+                rsp_rdata_q <= exec_held ? exec_rdata_q : cpuif_rd_data;
+                rsp_err_q <= exec_held ? exec_err_q : (cpuif_rd_err | cpuif_wr_err);
+                rid_q <= exec_held ? exec_rid_q : rid_inflight;
             end
         end
     end
-
-    // R-channel outputs: forwarded from the regblock on the ack cycle, then held
-    // stable from the rsp_* registers for as long as the manager stalls.
-    assign s_obi_rvalid = rsp_pending | rsp_ack;
-    assign s_obi_rdata = rsp_pending ? rsp_rdata_q : cpuif_rd_data;
-    assign s_obi_err = rsp_pending ? rsp_err_q : (cpuif_rd_err | cpuif_wr_err);
-    assign s_obi_rid = rid_q;
-
-    // A-channel grant. Assert only when a req&&gnt beat would be accepted:
-    // idle, or completing the R handshake this cycle (back-to-back accept).
-    assign s_obi_gnt = ~is_active | obi_finish;
 
     logic cpuif_req_masked;
 

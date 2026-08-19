@@ -57,7 +57,6 @@ async def _exercise(tb):
         if randint(0, 1):
             await tb.intf.read(addr, val)
 
-
 @test()
 async def test_dut_external(dut):
     tb = testbench(dut)
@@ -156,6 +155,53 @@ async def test_dut_interleaved_no_waits(dut):
         assert got == exp, (
             f"read tx_id={tx_id}: got 0x{got:08x}, expected 0x{exp:08x}"
         )
+
+    await tb.cr.end_test(50)
+
+
+@test()
+async def test_dut_basic_run(dut):
+    """Packed write_nowait then read_nowait across the external SRAM."""
+    tb = testbench(dut)
+    tb.intf.max_outstanding = 4
+
+    await tb.cr.wait_clkn(200)
+
+    x = [randint(0, (2**32) - 1) for _ in range(tb.n_regs)]
+    for i in range(tb.n_regs):
+        tb.intf.write_nowait(i * tb.incr, x[i])
+#     await tb.intf.wait()
+#     await tb.cr.end_test(50)
+    for i in range(tb.n_regs):
+        tb.intf.read_nowait(i * tb.incr, x[i])
+
+    await tb.intf.wait()
+    await tb.cr.end_test(50)
+
+
+@test()
+async def test_dut_nowait_packed_rready_backpressure(dut):
+    """Queued traffic with random rready stalls against the external SRAM."""
+    tb = testbench(dut)
+    tb.intf.enable_backpressure(rready=True, seednum=0x0B4)
+
+    await tb.cr.wait_clkn(200)
+
+    x0 = randint(0, 0xFFFFFFFF)
+    x1 = randint(0, 0xFFFFFFFF)
+    tb.intf.write_nowait(0x0010, x0)
+    tb.intf.write_nowait(0x0014, x1)
+    rx0 = tb.intf.read_nowait(0x0010, x0)
+    rx1 = tb.intf.read_nowait(0x0014, x1)
+    await tb.intf.wait()
+
+    results = {}
+    while tb.intf.count_rx:
+        ret, tx_id = tb.intf.queue_rx.popleft()
+        results[tx_id] = int.from_bytes(ret, "little")
+
+    assert results[rx0] == x0
+    assert results[rx1] == x1
 
     await tb.cr.end_test(50)
 

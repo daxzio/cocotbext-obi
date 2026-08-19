@@ -1,0 +1,4 @@
+property early_external_read {
+    component = mem;
+    type = boolean;
+};

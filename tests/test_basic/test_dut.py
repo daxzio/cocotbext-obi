@@ -146,6 +146,25 @@ async def test_dut_basic(dut):
 
     await tb.cr.end_test(50)
 
+@test()
+async def test_dut_basic_run(dut):
+    tb = testbench(dut, reset_sense=1)
+    tb.intf.max_outstanding = 4
+
+    await tb.cr.wait_clkn(20)
+
+    x = []
+    for i in range(tb.n_regs):
+        x.append(randint(0, (2**32) - 1))
+    for i in range(tb.n_regs):
+        tb.intf.write_nowait(0x0000+(i*4), x[i])
+#     await tb.cr.end_test(50)
+    for i in range(tb.n_regs):
+        tb.intf.read_nowait(0x0000+(i*4))
+
+    await tb.intf.wait()
+
+    await tb.cr.end_test(50)
 
 @test()
 async def test_dut_grant_spacing(dut):
