@@ -46,12 +46,8 @@ ifeq ($(TOPLEVEL_LANG),verilog)
 		COMPILE_ARGS += -top ${TOPLEVEL}
 	else ifeq ($(SIM),verilator)
         DEFINES += COCOTB_VERILATOR=1
-		COMPILE_ARGS += --no-timing -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-STMTDLY
-# 		COMPILE_ARGS += --public
-# 		COMPILE_ARGS += --public-flat-rw
-# 		COMPILE_ARGS += --public-depth 10 --hierarchical -j 8 --public-flat-rw
-# 	    EXTRA_ARGS += --public-depth 10
-# 		PLUSARGS += --public-depth 10
+		COMPILE_ARGS += --no-timing
+# 		COMPILE_ARGS += -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-STMTDLY
 	endif
 endif
 
