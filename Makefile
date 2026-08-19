@@ -76,7 +76,7 @@ dist:
 	@echo "Checking package..."
 	twine check dist/*
 
-GIT_TAG?=0.0.1
+GIT_TAG?=1.0.0
 VERSION_FILE?=`find cocotbext -name version.py`
 release:
 	echo "Release v${GIT_TAG}"
